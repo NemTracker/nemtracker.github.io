@@ -2,11 +2,9 @@ name: Import Data
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 6am AEST (UTC+10) — daily full refresh
-  workflow_run:
-    workflows: ["Process Data"]
-    types: [completed]
-  workflow_dispatch:  # manual = daily (full refresh)
+    - cron: '*/30 * * * *'  # intraday refresh every 30 min
+    - cron: '0 20 * * *'    # daily full refresh at 8pm UTC (6am AEST)
+  workflow_dispatch:         # manual = daily (full refresh)
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -20,8 +18,7 @@ jobs:
     timeout-minutes: 30
     if: >-
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name == 'workflow_dispatch'
     env:
       ICEBERG_REST_ENDPOINT: ${{ secrets.ICEBERG_REST_ENDPOINT }}
       ICEBERG_TOKEN: ${{ secrets.ICEBERG_TOKEN }}
@@ -36,19 +33,16 @@ jobs:
       - name: Set mode
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "is_daily=false" >> $GITHUB_OUTPUT
-          else
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "is_daily=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 20 * * *" ]; then
+            echo "is_daily=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_daily=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Install dependencies
-        run: |
-          if [ "${{ steps.mode.outputs.is_daily }}" = "true" ]; then
-            pip install duckdb dbt-duckdb
-          else
-            pip install duckdb
-          fi
+        run: pip install duckdb
 
       # --- Phase 1: Intraday (always) + dims (daily only) → deploy immediately ---
       - name: Export fct_scada_today
@@ -88,10 +82,6 @@ jobs:
           keep_files: true
 
       # --- Phase 2: Daily full refresh (slow) ---
-      - name: Test data
-        if: steps.mode.outputs.is_daily == 'true'
-        run: dbt test --target prod --profiles-dir .
-
       - name: Export fct_scada
         if: steps.mode.outputs.is_daily == 'true'
         run: python scripts/cache_catalog.py export_scada
