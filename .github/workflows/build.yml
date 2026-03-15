@@ -1,0 +1,55 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-duckdb
+      - name: Build, test and publish docs
+        env:
+          DBT_DUCKDB_PATH: ci.duckdb
+        run: |
+          dbt build --target ci --profiles-dir .
+          dbt docs generate --target ci --profiles-dir . --empty-catalog
+          mkdir -p dashboard/dag
+          cp target/index.html dashboard/dag/
+          cp target/manifest.json dashboard/dag/
+          cp target/catalog.json dashboard/dag/
+      - name: Commit dbt docs
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dashboard/dag/
+          git diff --cached --quiet || (git commit -m "Update dbt docs" && git pull --rebase && git push)
+      - name: Prepare deploy directory
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          mkdir -p deploy
+          cp dashboard/index.html deploy/
+          cp dashboard/coi-serviceworker.js deploy/
+          cp -r dashboard/dag deploy/
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy
+          keep_files: true
