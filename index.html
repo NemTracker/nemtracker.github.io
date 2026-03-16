@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Australian Energy Dashboard</title>
+  <script src="coi-serviceworker.js"></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0f1117; color: #e1e4e8; }
+    header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 0.4rem 2rem; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+    header .title-block { display: flex; flex-direction: column; }
+    header h1 { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
+    header .subtitle { font-size: 0.7rem; color: #8b949e; }
+    #status { font-size: 0.7rem; display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+    #status .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    #status.connected .dot { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    #status.error .dot { background: #f85149; box-shadow: 0 0 6px #f85149; }
+    #status.loading .dot { background: #d29922; box-shadow: 0 0 6px #d29922; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .filter-group { display: flex; align-items: center; gap: 0.4rem; }
+    .filter-group label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .filter-group select { padding: 0.35rem 0.6rem; border: 1px solid #30363d; border-radius: 6px; font-size: 0.8rem; background: #0d1117; color: #e1e4e8; cursor: pointer; outline: none; transition: border-color 0.2s; }
+    .filter-group select:hover { border-color: #58a6ff; }
+    .filter-group select:focus { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.15); }
+    .active-filters { display: flex; gap: 0.4rem; padding: 0.5rem 2rem; background: rgba(210,153,34,0.08); flex-wrap: wrap; align-items: center; font-size: 0.75rem; }
+    .active-filters:empty { display: none; }
+    .filter-tag { background: #58a6ff; color: #0d1117; padding: 0.15rem 0.5rem; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; font-weight: 600; font-size: 0.7rem; transition: background 0.2s; }
+    .filter-tag:hover { background: #f85149; color: white; }
+    .filter-tag::after { content: "\00d7"; font-size: 0.9rem; }
+    .kpi-row { display: flex; gap: 0.6rem; padding: 0.5rem 2rem; flex-wrap: wrap; }
+    .kpi-card { flex: 1; min-width: 140px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.5rem 0.8rem; }
+    .kpi-card .kpi-label { font-size: 0.65rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .kpi-card .kpi-value { font-size: 1.3rem; font-weight: 700; margin-top: 0.1rem; }
+    .kpi-card .kpi-sub { font-size: 0.65rem; color: #8b949e; margin-top: 0.05rem; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; padding: 0 2rem 1rem; transition: opacity 0.2s; }
+    .charts.loading { opacity: 0.4; }
+    .chart-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.6rem; }
+    .chart-card h2 { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; color: #e1e4e8; display: inline; }
+    .chart-card .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.3rem; }
+    .chart-card.full-width { grid-column: 1 / -1; }
+    .duid-dropdown { position: relative; }
+    .duid-trigger { padding: 0.35rem 0.6rem; border: 1px solid #30363d; border-radius: 6px; font-size: 0.8rem; background: #0d1117; color: #e1e4e8; cursor: pointer; outline: none; transition: border-color 0.2s; white-space: nowrap; }
+    .duid-trigger:hover { border-color: #58a6ff; }
+    .duid-panel { display: none; position: absolute; top: 100%; left: 0; z-index: 1000; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; width: 280px; margin-top: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .duid-panel.open { display: block; }
+    .duid-search { width: 100%; padding: 0.4rem 0.5rem; border: none; border-bottom: 1px solid #30363d; background: #161b22; color: #e1e4e8; font-size: 0.8rem; outline: none; border-radius: 6px 6px 0 0; box-sizing: border-box; }
+    .duid-list { max-height: 240px; overflow-y: auto; }
+    .duid-list label { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.5rem; cursor: pointer; font-size: 0.75rem; color: #e1e4e8; text-transform: none; letter-spacing: normal; font-weight: 400; }
+    .duid-list label:hover { background: rgba(88,166,255,0.1); }
+    .duid-list input[type=checkbox] { accent-color: #58a6ff; }
+    .chart-container { width: 100%; }
+    .tab-bar { display: flex; gap: 0; padding: 0 2rem; border-bottom: 1px solid #30363d; background: #0f1117; }
+    .tab-btn { padding: 0.5rem 1.2rem; font-size: 0.8rem; font-weight: 600; color: #8b949e; background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.2s; }
+    .tab-btn:hover { color: #e1e4e8; }
+    .tab-btn.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+    .analyze-controls { display: flex; gap: 0.8rem; padding: 0.8rem 2rem; align-items: center; flex-wrap: wrap; }
+    .analyze-controls label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .multi-dropdown { position: relative; }
+    .multi-dropdown .dd-trigger { padding: 0.35rem 0.6rem; border: 1px solid #30363d; border-radius: 6px; font-size: 0.8rem; background: #0d1117; color: #e1e4e8; cursor: pointer; outline: none; transition: border-color 0.2s; white-space: nowrap; }
+    .multi-dropdown .dd-trigger:hover { border-color: #58a6ff; }
+    .multi-dropdown .dd-panel { display: none; position: absolute; top: 100%; left: 0; z-index: 1000; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; min-width: 200px; margin-top: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .multi-dropdown .dd-panel.open { display: block; }
+    .multi-dropdown .dd-panel label { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; cursor: pointer; font-size: 0.8rem; color: #e1e4e8; text-transform: none; letter-spacing: normal; font-weight: 400; }
+    .multi-dropdown .dd-panel label:hover { background: rgba(88,166,255,0.1); }
+    .multi-dropdown .dd-panel label.disabled { color: #484f58; cursor: default; }
+    .multi-dropdown .dd-panel input[type=checkbox] { accent-color: #58a6ff; }
+    .btn-analyze { padding: 0.4rem 1rem; border: 1px solid #30363d; border-radius: 6px; font-size: 0.8rem; font-weight: 600; background: none; color: #e1e4e8; cursor: pointer; transition: all 0.2s; }
+    .btn-analyze:hover { border-color: #58a6ff; color: #58a6ff; }
+    .btn-analyze.primary { background: #238636; border-color: #238636; color: #fff; }
+    .btn-analyze.primary:hover { background: #2ea043; border-color: #2ea043; }
+    .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+    .analyze-info { font-size: 0.75rem; color: #8b949e; padding: 0 2rem; }
+    .analyze-table-wrap { padding: 0 2rem 1rem; overflow-x: auto; max-height: 60vh; overflow-y: auto; }
+    .analyze-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .analyze-table th { position: sticky; top: 0; background: #161b22; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid #30363d; text-align: left; }
+    .analyze-table td { padding: 0.3rem 0.6rem; border-bottom: 1px solid #21262d; color: #e1e4e8; }
+    .analyze-table tr:hover td { background: rgba(88,166,255,0.05); }
+    @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } .kpi-row { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-block">
+      <h1>Australian Energy Dashboard</h1>
+    </div>
+    <div class="filter-group">
+      <label>Region</label>
+      <select id="regionFilter"><option value="">All Regions</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Fuel</label>
+      <select id="fuelFilter"><option value="">All Fuel Types</option></select>
+    </div>
+    <div class="filter-group">
+      <label>DUID</label>
+      <div class="duid-dropdown" id="duidDropdown">
+        <button class="duid-trigger" id="duidTrigger" type="button">All DUIDs</button>
+        <div class="duid-panel" id="duidPanel">
+          <input type="text" class="duid-search" id="duidSearch" placeholder="Search DUIDs...">
+          <div class="duid-list" id="duidList"></div>
+        </div>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>From</label>
+      <input type="date" id="dateFrom" style="padding:0.35rem 0.4rem;border:1px solid #30363d;border-radius:6px;font-size:0.8rem;background:#0d1117;color:#e1e4e8;cursor:pointer;outline:none;">
+    </div>
+    <div class="filter-group">
+      <label>To</label>
+      <input type="date" id="dateTo" style="padding:0.35rem 0.4rem;border:1px solid #30363d;border-radius:6px;font-size:0.8rem;background:#0d1117;color:#e1e4e8;cursor:pointer;outline:none;">
+    </div>
+    <a href="https://github.com/djouallah/analytics-as-code" target="_blank" style="color:#8b949e;text-decoration:none;display:inline-flex;align-items:center;gap:3px;" title="View on GitHub"><svg height="16" width="16" viewBox="0 0 16 16" fill="#8b949e"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+    <a href="dag/" target="_blank" style="color:#8b949e;text-decoration:none;font-size:0.75rem;font-weight:600;letter-spacing:0.05em;" title="View dbt DAG">DAG</a>
+    <div id="status" class="loading"><span class="dot"></span><span id="statusText">Initializing DuckDB...</span></div>
+  </header>
+  <div class="active-filters" id="activeFilters"></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="analyze">Analyze</button>
+  </div>
+
+  <div id="view-dashboard">
+  <div class="kpi-row">
+    <div class="kpi-card"><div class="kpi-label">Total Generation</div><div class="kpi-value" id="kpiGen">--</div><div class="kpi-sub" id="kpiGenSub">Average MW</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Price</div><div class="kpi-value" id="kpiPrice">--</div><div class="kpi-sub">$/MWh across regions</div></div>
+    <div class="kpi-card"><div class="kpi-label">Active Generators</div><div class="kpi-value" id="kpiGens">--</div><div class="kpi-sub">DUIDs reporting</div></div>
+    <div class="kpi-card"><div class="kpi-label">Top Fuel Source</div><div class="kpi-value" id="kpiTopFuel">--</div><div class="kpi-sub" id="kpiTopFuelSub">by generation</div></div>
+    <div class="kpi-card"><div class="kpi-label">Latest MW</div><div class="kpi-value" id="kpiLatestMW">--</div><div class="kpi-sub" id="kpiLatestMWSub">total generation</div></div>
+    <div class="kpi-card"><div class="kpi-label">Latest Price</div><div class="kpi-value" id="kpiLatestPrice">--</div><div class="kpi-sub" id="kpiLatestPriceSub">avg $/MWh</div></div>
+  </div>
+
+  <div class="charts">
+    <div class="chart-card full-width">
+      <div class="chart-header"><h2 id="title-generation">Generation by Fuel Type (MW)</h2></div>
+      <div class="chart-container" id="chart-generation" style="height:320px;"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-header"><h2>Average Price by Region ($/MWh)</h2></div>
+      <div class="chart-container" id="chart-price" style="height:280px;"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-container" id="chart-map" style="height:280px;"></div>
+    </div>
+  </div>
+  </div>
+
+  <div id="view-analyze" style="display:none">
+    <div class="analyze-controls">
+      <label>Measures</label>
+      <div class="multi-dropdown" id="measDropdown">
+        <button class="dd-trigger" id="measTrigger" type="button">Generation, Price</button>
+        <div class="dd-panel" id="measPanel">
+          <label><input type="checkbox" id="measGeneration" checked> Generation</label>
+          <label><input type="checkbox" id="measPrice" checked> Price</label>
+        </div>
+      </div>
+      <label>Dimensions</label>
+      <div class="multi-dropdown" id="dimDropdown">
+        <button class="dd-trigger" id="dimTrigger" type="button">Date</button>
+        <div class="dd-panel" id="dimPanel">
+          <label class="disabled"><input type="checkbox" checked disabled> Date</label>
+          <label><input type="checkbox" id="dimTime"> Time</label>
+          <label><input type="checkbox" id="dimDUID"> DUID</label>
+          <label><input type="checkbox" id="dimFuel"> Fuel</label>
+          <label><input type="checkbox" id="dimRegion"> Region</label>
+        </div>
+      </div>
+      <button class="btn-analyze" id="analyzePreview" type="button">Preview</button>
+      <button class="btn-analyze primary" id="analyzeDownload" type="button">Download CSV</button>
+    </div>
+    <div class="analyze-info" id="analyzeInfo"></div>
+    <div class="analyze-table-wrap">
+      <table class="analyze-table" id="analyzeTable"></table>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm";
+
+    // =========================================================================
+    // 1. CONSTANTS & THEME
+    // =========================================================================
+
+    const darkTheme = {
+      backgroundColor: 'transparent',
+      textStyle: { color: '#8b949e' },
+      title: { textStyle: { color: '#e1e4e8' } },
+      legend: { textStyle: { color: '#8b949e' }, pageTextStyle: { color: '#8b949e' } },
+      tooltip: {
+        backgroundColor: 'rgba(22,27,34,0.95)',
+        borderColor: '#30363d',
+        textStyle: { color: '#e1e4e8', fontSize: 12 },
+      },
+      categoryAxis: { axisLine: { lineStyle: { color: '#30363d' } }, axisTick: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#8b949e' }, splitLine: { lineStyle: { color: '#21262d' } } },
+      valueAxis: { axisLine: { lineStyle: { color: '#30363d' } }, axisTick: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#8b949e' }, splitLine: { lineStyle: { color: '#21262d' } } },
+      timeAxis: { axisLine: { lineStyle: { color: '#30363d' } }, axisTick: { lineStyle: { color: '#30363d' } }, axisLabel: { color: '#8b949e' }, splitLine: { lineStyle: { color: '#21262d' } } },
+    };
+    echarts.registerTheme('dark-custom', darkTheme);
+
+    const PALETTE = ['#58a6ff','#f0883e','#3fb950','#bc8cff','#f778ba','#d29922','#79c0ff','#56d364','#db6d28','#ff7b72','#7ee787','#a5d6ff'];
+    const FUEL_COLORS = {
+      'Black coal': '#444444',
+      'Brown coal': '#8B4513',
+      'Natural gas': '#f0883e',
+      'Natural gas / fuel oil': '#d29922',
+      'Natural gas / diesel': '#db6d28',
+      'Coal seam methane': '#6b4c2a',
+      'Wind': '#58a6ff',
+      'Solar': '#f7c948',
+      'Water': '#3fb950',
+      'Bagasse': '#7ee787',
+      'Diesel': '#ff7b72',
+      'Kerosene': '#f778ba',
+      'Waste coal mine gas': '#888888',
+      'Grid': '#bc8cff',
+      'Other': '#aaaaaa',
+      '-': '#aaaaaa',
+    };
+    function fuelColor(name) { return FUEL_COLORS[name] || PALETTE[Math.abs([...name].reduce((h,c)=>h*31+c.charCodeAt(0)|0,0)) % PALETTE.length]; }
+
+    // =========================================================================
+    // 2. STATE & DOM UTILITIES
+    // =========================================================================
+
+    function setStatus(msg, type = "loading") {
+      document.getElementById("statusText").textContent = msg;
+      document.getElementById("status").className = type;
+    }
+
+    const crossFilter = { fuel: null, region: null, duids: [] };
+    let loadedPeriods = [];
+    let aggLoaded = false;
+    let _renderSeq = 0;
+
+    function updateFilterTags() {
+      const el = document.getElementById("activeFilters");
+      el.innerHTML = "";
+      if (crossFilter.fuel) {
+        const tag = document.createElement("span");
+        tag.className = "filter-tag";
+        tag.textContent = crossFilter.fuel;
+        tag.addEventListener("click", () => { crossFilter.fuel = null; renderAll(); });
+        el.append(tag);
+      }
+      if (crossFilter.region) {
+        const tag = document.createElement("span");
+        tag.className = "filter-tag";
+        tag.textContent = crossFilter.region;
+        tag.addEventListener("click", () => { crossFilter.region = null; renderAll(); });
+        el.append(tag);
+      }
+      for (const duid of crossFilter.duids) {
+        const tag = document.createElement("span");
+        tag.className = "filter-tag";
+        tag.textContent = duid;
+        tag.addEventListener("click", () => { crossFilter.duids = crossFilter.duids.filter(d => d !== duid); updateDuidTrigger(); renderAll(); });
+        el.append(tag);
+      }
+    }
+
+    // =========================================================================
+    // 3. DUCKDB SETUP
+    // =========================================================================
+
+    let conn;
+
+    // Cache a remote .duckdb file in OPFS. Downloads if missing or stale.
+    // source: 'opfs-hit' | 'opfs-miss' | 'opfs-refresh'
+    async function cacheInOPFS(db, url, filename) {
+      const root = await navigator.storage.getDirectory();
+      const cacheKey = `opfs_etag_${filename}`;
+      const cachedTag = localStorage.getItem(cacheKey);
+
+      // HEAD request to check if remote file changed
+      let remoteTag = null;
+      try {
+        const head = await fetch(url, { method: 'HEAD' });
+        remoteTag = head.headers.get('content-length');
+      } catch (e) {
+        console.log(`[OPFS] HEAD request failed (offline?), will use cache if available`);
+      }
+
+      // Try cached version: valid if tags match, or if offline and we have a cache
+      const cacheValid = cachedTag && (cachedTag === remoteTag || !remoteTag);
+      if (cacheValid) {
+        try {
+          setStatus("Loading from cache...");
+          const handle = await root.getFileHandle(filename);
+          const file = await handle.getFile();
+          const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+          console.log(`[OPFS] Cache hit for ${filename} (${sizeMB} MB)`);
+          await db.registerFileBuffer(filename, new Uint8Array(await file.arrayBuffer()));
+          return { source: 'opfs-hit' };
+        } catch (e) {
+          console.log(`[OPFS] Cache entry missing from OPFS despite etag, will re-fetch`);
+        }
+      }
+
+      // Fetch and cache in OPFS
+      const reason = cachedTag ? 'file changed on server' : 'first download';
+      console.log(`[OPFS] Fetching ${filename} (${reason})`);
+      setStatus("Downloading database...");
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch ${filename}: HTTP ${resp.status}`);
+      const buffer = new Uint8Array(await resp.arrayBuffer());
+      if (buffer.byteLength < 100) throw new Error(`${filename} is too small (${buffer.byteLength} bytes), likely not a valid database`);
+      const sizeMB = (buffer.byteLength / 1024 / 1024).toFixed(1);
+
+      const handle = await root.getFileHandle(filename, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(buffer);
+      await writable.close();
+      if (remoteTag) localStorage.setItem(cacheKey, remoteTag);
+      console.log(`[OPFS] Cached ${filename} (${sizeMB} MB) in OPFS`);
+
+      await db.registerFileBuffer(filename, buffer);
+      return { source: cachedTag ? 'opfs-refresh' : 'opfs-miss' };
+    }
+
+    let _db = null;
+    let _baseUrl = '';
+
+    async function initDuckDB() {
+      setStatus("Loading DuckDB WASM...");
+      const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+      const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+      const workerUrl = URL.createObjectURL(
+        new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" })
+      );
+      const worker = new Worker(workerUrl);
+      const logger = new duckdb.ConsoleLogger();
+      _db = new duckdb.AsyncDuckDB(logger, worker);
+      await _db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      URL.revokeObjectURL(workerUrl);
+
+      conn = await _db.connect();
+      _baseUrl = window.location.href.replace(/\/[^/]*$/, "");
+
+      // Phase 1: Load dim + today (enough for default "Last 3 days" view)
+      setStatus("Loading today's data...");
+      const [dimResult, todayResult] = await Promise.all([
+        cacheInOPFS(_db, `${_baseUrl}/data/energy_dim.duckdb`, 'energy_dim.duckdb'),
+        cacheInOPFS(_db, `${_baseUrl}/data/energy_today.duckdb`, 'energy_today.duckdb'),
+      ]);
+      await conn.query("ATTACH 'energy_dim.duckdb' AS dim (READ_ONLY);");
+      await conn.query("ATTACH 'energy_today.duckdb' AS today (READ_ONLY);");
+      await conn.query("SET TimeZone = 'Australia/Brisbane';");
+      await conn.query("SET preserve_insertion_order = false;");
+      await refreshViews();
+
+      const sourceLabel = { 'opfs-hit': 'cached', 'opfs-miss': 'downloaded', 'opfs-refresh': 'refreshed' };
+      console.log(`[OPFS] dim: ${sourceLabel[dimResult.source]}, today: ${sourceLabel[todayResult.source]}`);
+      console.log(`[DuckDB] crossOriginIsolated: ${window.crossOriginIsolated} (${window.crossOriginIsolated ? 'multi-threaded' : 'single-threaded'})`);
+      setStatus(window._cutoffCached || "Connected", "connected");
+    }
+
+    async function loadDailyAggDatabase() {
+      const sourceLabel = { 'opfs-hit': 'cached', 'opfs-miss': 'downloaded', 'opfs-refresh': 'refreshed' };
+      const aggResult = await cacheInOPFS(_db, `${_baseUrl}/data/energy_daily_agg.duckdb`, 'energy_daily_agg.duckdb');
+      await conn.query("ATTACH 'energy_daily_agg.duckdb' AS agg (READ_ONLY);");
+      aggLoaded = true;
+      await refreshViews();
+      console.log(`[OPFS] agg: ${sourceLabel[aggResult.source]}`);
+    }
+
+    let _manifestCache = null;
+    const _attachedPeriods = new Set();
+
+    function periodsForRange(from, to) {
+      const periods = [];
+      let d = new Date(from);
+      const end = new Date(to);
+      while (d <= end) {
+        const y = d.getFullYear();
+        const h = d.getMonth() < 6 ? 1 : 2;
+        const tag = `${y}_h${h}`;
+        if (!periods.includes(tag)) periods.push(tag);
+        d = new Date(h === 1 ? `${y}-07-01` : `${y + 1}-01-01`);
+      }
+      return periods;
+    }
+
+    async function ensurePeriodsForRange(from, to) {
+      if (!_manifestCache) {
+        _manifestCache = await (await fetch(`${_baseUrl}/data/daily_manifest.json`)).json();
+      }
+      const available = new Set(_manifestCache.periods);
+      const needed = periodsForRange(from, to).filter(p => available.has(p) && !_attachedPeriods.has(p));
+      if (!needed.length) return;
+
+      setStatus("Downloading detailed data...", "loading");
+      const sourceLabel = { 'opfs-hit': 'cached', 'opfs-miss': 'downloaded', 'opfs-refresh': 'refreshed' };
+      const results = await Promise.all(
+        needed.map(p => cacheInOPFS(_db, `${_baseUrl}/data/energy_data_${p}.duckdb`, `energy_data_${p}.duckdb`))
+      );
+      for (let i = 0; i < needed.length; i++) {
+        const p = needed[i];
+        await conn.query(`ATTACH 'energy_data_${p}.duckdb' AS p${p} (READ_ONLY);`);
+        _attachedPeriods.add(p);
+        loadedPeriods.push(p);
+        console.log(`[OPFS] p${p}: ${sourceLabel[results[i].source]}`);
+      }
+      await refreshViews();
+      setStatus(window._cutoffCached || "Connected", "connected");
+    }
+
+    async function ensureAllPeriods() {
+      if (!_manifestCache) {
+        _manifestCache = await (await fetch(`${_baseUrl}/data/daily_manifest.json`)).json();
+      }
+      const needed = _manifestCache.periods.filter(p => !_attachedPeriods.has(p));
+      if (!needed.length) return;
+      setStatus("Downloading detailed data for export...", "loading");
+      const sourceLabel = { 'opfs-hit': 'cached', 'opfs-miss': 'downloaded', 'opfs-refresh': 'refreshed' };
+      const results = await Promise.all(
+        needed.map(p => cacheInOPFS(_db, `${_baseUrl}/data/energy_data_${p}.duckdb`, `energy_data_${p}.duckdb`))
+      );
+      for (let i = 0; i < needed.length; i++) {
+        const p = needed[i];
+        await conn.query(`ATTACH 'energy_data_${p}.duckdb' AS p${p} (READ_ONLY);`);
+        _attachedPeriods.add(p);
+        loadedPeriods.push(p);
+        console.log(`[OPFS] p${p}: ${sourceLabel[results[i].source]}`);
+      }
+      await refreshViews();
+      setStatus(window._cutoffCached || "Connected", "connected");
+    }
+
+    async function refreshViews() {
+      // v_scada: all loaded periods + today (5-min raw)
+      const scadaParts = loadedPeriods.map(p => `SELECT DUID, date, time, mw FROM p${p}.scada WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+      scadaParts.push(`SELECT DUID, date, time, mw FROM today.scada_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+      await conn.query(`CREATE OR REPLACE VIEW v_scada AS ${scadaParts.join(' UNION ALL ')}`);
+
+      // v_price: all loaded periods + today (5-min raw)
+      const priceParts = loadedPeriods.map(p => `SELECT REGIONID, date, time, price FROM p${p}.price WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+      priceParts.push(`SELECT REGIONID, date, time, price FROM today.price_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+      await conn.query(`CREATE OR REPLACE VIEW v_price AS ${priceParts.join(' UNION ALL ')}`);
+
+      // v_scada_daily / v_price_daily: pre-aggregated if agg loaded, else today-only
+      if (aggLoaded) {
+        await conn.query(`CREATE OR REPLACE VIEW v_scada_daily AS
+          SELECT DUID, date, mwh FROM agg.scada_daily WHERE date < CURRENT_DATE - INTERVAL 5 DAY
+          UNION ALL
+          SELECT DUID, date, CAST(SUM(mw) / 12.0 AS REAL) AS mwh FROM today.scada_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY GROUP BY DUID, date`);
+        await conn.query(`CREATE OR REPLACE VIEW v_price_daily AS
+          SELECT REGIONID, date, price FROM agg.price_daily WHERE date < CURRENT_DATE - INTERVAL 5 DAY
+          UNION ALL
+          SELECT REGIONID, date, CAST(AVG(price) AS REAL) AS price FROM today.price_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY GROUP BY REGIONID, date`);
+      } else {
+        await conn.query(`CREATE OR REPLACE VIEW v_scada_daily AS
+          SELECT DUID, date, CAST(SUM(mw) / 12.0 AS REAL) AS mwh FROM today.scada_today GROUP BY DUID, date`);
+        await conn.query(`CREATE OR REPLACE VIEW v_price_daily AS
+          SELECT REGIONID, date, CAST(AVG(price) AS REAL) AS price FROM today.price_today GROUP BY REGIONID, date`);
+      }
+    }
+
+    const _queryCache = new Map();
+    function clearQueryCache() { _queryCache.clear(); }
+
+    async function runQuery(sqlStr) {
+      const cached = _queryCache.get(sqlStr);
+      if (cached) return cached;
+      const result = await conn.query(sqlStr);
+      const numRows = Number(result.numRows);
+      const fields = result.schema.fields;
+      // Columnar: extract all columns as arrays at once (much faster than per-row .get())
+      const columns = fields.map(f => {
+        const col = result.getChild(f.name);
+        const arr = col.toArray();
+        // Convert BigInt64Array to regular numbers
+        if (arr instanceof BigInt64Array || arr instanceof BigUint64Array) {
+          return Array.from(arr, v => Number(v));
+        }
+        return arr;
+      });
+      const rows = new Array(numRows);
+      for (let i = 0; i < numRows; i++) {
+        const row = {};
+        for (let j = 0; j < fields.length; j++) {
+          row[fields[j].name] = columns[j][i];
+        }
+        rows[i] = row;
+      }
+      _queryCache.set(sqlStr, rows);
+      return rows;
+    }
+
+    // =========================================================================
+    // 4. HELPERS
+    // =========================================================================
+
+    // Grain: <=30d = 5-min intraday | >30d = daily aggregate
+    function getDateRange() {
+      return { from: document.getElementById("dateFrom").value, to: document.getElementById("dateTo").value };
+    }
+    function rangeDays() {
+      const { from, to } = getDateRange();
+      return Math.round((new Date(to) - new Date(from)) / 86400000);
+    }
+    function isIntradayMode() {
+      return rangeDays() <= 30;
+    }
+
+    function padTime(time) { return String(time).padStart(4, '0'); }
+
+    function formatTime(time) {
+      const hh = String(Math.floor(time / 100)).padStart(2, '0');
+      const mm = String(time % 100).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+
+    function formatDate(str) {
+      const [y, m, d] = str.split('-');
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `${parseInt(d)} ${months[parseInt(m) - 1]} ${y}`;
+    }
+
+    function buildTimeAxis(rows, timeDetail) {
+      if (timeDetail) {
+        const xKeys = [...new Set(rows.map(d => `${d.date}|${padTime(d.time)}`))].sort();
+        const xLabels = xKeys.map(k => {
+          const [dt, tm] = k.split('|');
+          return formatDate(dt) + ' ' + formatTime(parseInt(tm));
+        });
+        return { xKeys, xLabels };
+      }
+      const xKeys = [...new Set(rows.map(d => d.date))].sort();
+      const xLabels = xKeys.map(d => formatDate(d));
+      return { xKeys, xLabels };
+    }
+
+    function buildLookup(rows, keyFn, valueFn) {
+      const lookup = new Map();
+      for (const row of rows) lookup.set(keyFn(row), valueFn(row));
+      return lookup;
+    }
+
+    function dataZoomConfig(timeDetail) {
+      return timeDetail
+        ? [{ type: 'inside', start: 0, end: 100 }, { type: 'slider', start: 0, end: 100, height: 20, bottom: 35 }]
+        : [];
+    }
+
+    function yieldToUI() { return new Promise(r => setTimeout(r, 0)); }
+
+    async function downloadCSVDirect(sqlStr, filename) {
+      const exportConn = await _db.connect();
+      try {
+        const reader = await exportConn.send(sqlStr);
+        const chunks = [];
+        let headerWritten = false;
+        let rowCount = 0;
+        for await (const batch of reader) {
+          const cols = batch.schema.fields.map(f => f.name);
+          let chunk = '';
+          if (!headerWritten) {
+            chunk += cols.join(',') + '\n';
+            headerWritten = true;
+          }
+          const n = Number(batch.numRows);
+          for (let i = 0; i < n; i++) {
+            const vals = cols.map(c => {
+              let v = batch.getChild(c).get(i);
+              if (typeof v === 'bigint') v = Number(v);
+              return v ?? '';
+            });
+            chunk += vals.join(',') + '\n';
+          }
+          chunks.push(chunk);
+          rowCount += n;
+          await yieldToUI();
+        }
+        const blob = new Blob(chunks, { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        return rowCount;
+      } finally {
+        await exportConn.close();
+      }
+    }
+
+    // =========================================================================
+    // 5. SQL QUERY BUILDERS
+    // =========================================================================
+
+    const sql = {
+      // --- UNION ALL builders across year databases ---
+      // Raw 5-min grain (for CSV export)
+      _scadaRawUnion() {
+        const parts = loadedPeriods.map(p => `SELECT DUID, date, time, mw FROM p${p}.scada WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+        parts.push(`SELECT DUID, date, time, mw FROM today.scada_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      _priceRawUnion() {
+        const parts = loadedPeriods.map(p => `SELECT REGIONID, date, time, price FROM p${p}.price WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+        parts.push(`SELECT REGIONID, date, time, price FROM today.price_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      // Daily pre-aggregated (for charts when >7d)
+      _scadaDailyUnion() {
+        const parts = [
+          `SELECT DUID, date, mwh FROM agg.scada_daily WHERE date < CURRENT_DATE - INTERVAL 5 DAY`
+        ];
+        parts.push(
+          `SELECT DUID, date, CAST(SUM(mw) / 12.0 AS REAL) AS mwh FROM today.scada_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY GROUP BY DUID, date`
+        );
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      _priceDailyUnion() {
+        const parts = [
+          `SELECT REGIONID, date, price FROM agg.price_daily WHERE date < CURRENT_DATE - INTERVAL 5 DAY`
+        ];
+        parts.push(
+          `SELECT REGIONID, date, CAST(AVG(price) AS REAL) AS price FROM today.price_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY GROUP BY REGIONID, date`
+        );
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      // --- Intraday UNION builders (selected periods + today, deduped) ---
+      _scadaIntradayUnion() {
+        const { from, to } = getDateRange();
+        const needed = periodsForRange(from, to).filter(p => _attachedPeriods.has(p));
+        const parts = needed.map(p => `SELECT DUID, date, time, mw FROM p${p}.scada WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+        parts.push(`SELECT DUID, date, time, mw FROM today.scada_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      _priceIntradayUnion() {
+        const { from, to } = getDateRange();
+        const needed = periodsForRange(from, to).filter(p => _attachedPeriods.has(p));
+        const parts = needed.map(p => `SELECT REGIONID, date, time, price FROM p${p}.price WHERE date < CURRENT_DATE - INTERVAL 5 DAY`);
+        parts.push(`SELECT REGIONID, date, time, price FROM today.price_today WHERE date >= CURRENT_DATE - INTERVAL 5 DAY`);
+        return parts.join('\n            UNION ALL\n            ');
+      },
+
+      // --- FROM clauses ---
+      // Intraday (<=7d): 5-min grain from loaded year-half DBs + today
+      // Daily (>7d): pre-aggregated daily + today aggregated to daily
+      fromScada() {
+        if (isIntradayMode()) {
+          return `(${sql._scadaIntradayUnion()}) sc
+            JOIN dim.dim_calendar c ON c.date = sc.date
+            JOIN dim.dim_duid d ON sc.DUID = d.DUID`;
+        }
+        if (!aggLoaded) {
+          return `(SELECT DUID, date, CAST(SUM(mw) / 12.0 AS REAL) AS mwh FROM today.scada_today GROUP BY DUID, date) sc
+            JOIN dim.dim_calendar c ON c.date = sc.date
+            JOIN dim.dim_duid d ON sc.DUID = d.DUID`;
+        }
+        return `(${sql._scadaDailyUnion()}) sc
+          JOIN dim.dim_calendar c ON c.date = sc.date
+          JOIN dim.dim_duid d ON sc.DUID = d.DUID`;
+      },
+
+      fromPrice() {
+        if (isIntradayMode()) {
+          return `(${sql._priceIntradayUnion()}) p
+            JOIN dim.dim_calendar c ON c.date = p.date`;
+        }
+        if (!aggLoaded) {
+          return `(SELECT REGIONID, date, CAST(AVG(price) AS REAL) AS price FROM today.price_today GROUP BY REGIONID, date) p
+            JOIN dim.dim_calendar c ON c.date = p.date`;
+        }
+        return `(${sql._priceDailyUnion()}) p
+          JOIN dim.dim_calendar c ON c.date = p.date`;
+      },
+
+      // --- WHERE clauses ---
+      whereScada() {
+        const region = document.getElementById("regionFilter").value || crossFilter.region;
+        const fuel = document.getElementById("fuelFilter").value || crossFilter.fuel;
+        const { from, to } = getDateRange();
+        const clauses = [`c.date >= '${from}' AND c.date <= '${to}'`];
+        if (region) clauses.push(`d.Region = '${region}'`);
+        if (fuel) clauses.push(`d.FuelSourceDescriptor = '${fuel}'`);
+        if (crossFilter.duids.length) clauses.push(`sc.DUID IN (${crossFilter.duids.map(d => `'${d}'`).join(',')})`);
+        return clauses.join(" AND ");
+      },
+
+      wherePrice() {
+        const region = document.getElementById("regionFilter").value || crossFilter.region;
+        const { from, to } = getDateRange();
+        const clauses = [`c.date >= '${from}' AND c.date <= '${to}'`];
+        if (region) clauses.push(`p.REGIONID = '${region}'`);
+        if (!region && (crossFilter.duids.length || crossFilter.fuel)) {
+          const fuel = document.getElementById("fuelFilter").value || crossFilter.fuel;
+          let regionFilter;
+          if (crossFilter.duids.length) {
+            regionFilter = `p.REGIONID IN (SELECT Region FROM dim.dim_duid WHERE DUID IN (${crossFilter.duids.map(d => `'${d}'`).join(',')}))`;
+          } else if (fuel) {
+            regionFilter = `p.REGIONID IN (SELECT DISTINCT Region FROM dim.dim_duid WHERE FuelSourceDescriptor = '${fuel}')`;
+          }
+          if (regionFilter) clauses.push(regionFilter);
+        }
+        return clauses.join(" AND ");
+      },
+
+      // --- Filter population ---
+      regions: "SELECT DISTINCT Region FROM dim.dim_duid WHERE Region IS NOT NULL AND Region != 'WA1' ORDER BY Region",
+      fuels: "SELECT DISTINCT FuelSourceDescriptor AS fuel FROM dim.dim_duid WHERE FuelSourceDescriptor IS NOT NULL ORDER BY fuel",
+      allDuids: "SELECT DUID, Region, FuelSourceDescriptor AS fuel FROM dim.dim_duid WHERE DUID IS NOT NULL ORDER BY DUID",
+
+      // --- Generation chart ---
+      generation(seriesAlias, seriesCol, valCol, intraday) {
+        if (intraday) {
+          return `
+            SELECT CAST(sc.date AS VARCHAR) AS date, CAST(sc.time AS INTEGER) AS time, ${seriesAlias}, SUM(${valCol})::DOUBLE AS total_mw, CAST(COUNT(*) AS INTEGER) AS row_cnt
+            FROM ${sql.fromScada()}
+            WHERE ${sql.whereScada()}
+            GROUP BY sc.date, sc.time, ${seriesCol}
+            ORDER BY sc.date, sc.time`;
+        }
+        return `
+          SELECT CAST(sc.date AS VARCHAR) AS date, ${seriesAlias}, SUM(${valCol})::DOUBLE AS total_mw, CAST(COUNT(*) AS INTEGER) AS row_cnt
+          FROM ${sql.fromScada()}
+          WHERE ${sql.whereScada()}
+          GROUP BY sc.date, ${seriesCol}
+          ORDER BY sc.date`;
+      },
+
+      // --- Price chart ---
+      price(intraday) {
+        if (intraday) {
+          return `
+            SELECT CAST(p.date AS VARCHAR) AS date, CAST(p.time AS INTEGER) AS time, p.REGIONID AS Region, AVG(p.price)::DOUBLE AS avg_price
+            FROM ${sql.fromPrice()}
+            WHERE ${sql.wherePrice()}
+            GROUP BY p.date, p.time, p.REGIONID
+            ORDER BY p.date, p.time`;
+        }
+        return `
+          SELECT CAST(p.date AS VARCHAR) AS date, p.REGIONID AS Region, AVG(p.price)::DOUBLE AS avg_price
+          FROM ${sql.fromPrice()}
+          WHERE ${sql.wherePrice()}
+          GROUP BY p.date, p.REGIONID
+          ORDER BY p.date`;
+      },
+
+      // --- Map ---
+      mapScatter(col) {
+        return `
+          SELECT sc.DUID, d.FuelSourceDescriptor AS fuel, d.Region,
+            d.latitude::DOUBLE AS lat, d.longitude::DOUBLE AS lon,
+            AVG(${col})::DOUBLE AS mw
+          FROM ${sql.fromScada()}
+          WHERE ${sql.whereScada()} AND d.latitude IS NOT NULL
+          GROUP BY sc.DUID, d.FuelSourceDescriptor, d.Region, d.latitude, d.longitude`;
+      },
+
+      generatorCount() {
+        return `
+          SELECT CAST(COUNT(DISTINCT sc.DUID) AS INTEGER) AS cnt
+          FROM ${sql.fromScada()}
+          WHERE ${sql.whereScada()}`;
+      },
+
+      // --- Cutoff timestamp ---
+      cutoff: "SELECT CAST(MAX(date) AS VARCHAR) || ' ' || substr(lpad(CAST(MAX(time) AS VARCHAR), 4, '0'), 1, 2) || ':' || substr(lpad(CAST(MAX(time) AS VARCHAR), 4, '0'), 3, 2) AS last_update FROM today.scada_today WHERE date = (SELECT MAX(date) FROM today.scada_today)",
+    };
+
+    // =========================================================================
+    // 6. CHART RENDERERS
+    // =========================================================================
+
+    const charts = {};
+    function getChart(id) {
+      if (!charts[id]) charts[id] = echarts.init(document.getElementById(id), 'dark-custom');
+      return charts[id];
+    }
+    window.addEventListener('resize', () => { Object.values(charts).forEach(c => c.resize()); });
+
+    // --- Generation by Fuel Type (stacked area) ---
+    async function renderGeneration(seq) {
+      const intraday = isIntradayMode();
+      const unit = intraday ? 'MW' : 'MWh';
+      const drillFuel = crossFilter.fuel;
+
+      document.getElementById("title-generation").textContent = drillFuel
+        ? `${drillFuel} by DUID (${unit})`
+        : `Generation by Fuel Type (${unit})`;
+
+      const valCol = intraday ? 'sc.mw' : 'sc.mwh';
+      const seriesCol = drillFuel ? 'sc.DUID' : 'd.FuelSourceDescriptor';
+      const seriesAlias = drillFuel ? 'sc.DUID AS series' : 'd.FuelSourceDescriptor AS series';
+
+      const data = await runQuery(sql.generation(seriesAlias, seriesCol, valCol, intraday));
+      if (seq !== _renderSeq || !data.length) return;
+
+      const { xKeys, xLabels } = buildTimeAxis(data, intraday);
+      const lookup = buildLookup(data,
+        row => intraday ? `${row.date}|${padTime(row.time)}|${row.series}` : `${row.date}|${row.series}`,
+        row => row.total_mw
+      );
+
+      // Sort series by total descending, limit to top 15 in drill mode
+      const seriesTotals = {};
+      for (const row of data) seriesTotals[row.series] = (seriesTotals[row.series] || 0) + row.total_mw;
+      let seriesNames = Object.entries(seriesTotals).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+      if (drillFuel && seriesNames.length > 15) seriesNames = seriesNames.slice(0, 15);
+
+      const largeMode = xKeys.length > 2000;
+      const series = seriesNames.map((name, i) => ({
+        name,
+        type: 'line',
+        stack: 'total',
+        areaStyle: { opacity: 0.85 },
+        lineStyle: { width: 0 },
+        symbol: 'none',
+        emphasis: { focus: 'series' },
+        triggerLineEvent: true,
+        sampling: 'lttb',
+        large: largeMode,
+        progressive: largeMode ? 500 : 0,
+        itemStyle: { color: drillFuel ? PALETTE[i % PALETTE.length] : fuelColor(name) },
+        data: xKeys.map(k => lookup.get(`${k}|${name}`) || 0),
+      }));
+
+      let hoveredSeries = '';
+      const chart = getChart('chart-generation');
+      chart.off('mouseover'); chart.off('mouseout');
+      chart.on('mouseover', p => { if (p.seriesName) hoveredSeries = p.seriesName; });
+      chart.on('mouseout', () => { hoveredSeries = ''; });
+      chart.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, formatter: params => {
+          const target = hoveredSeries ? params.find(p => p.seriesName === hoveredSeries) : null;
+          const p = target || params.filter(p => p.value > 0).sort((a, b) => b.value - a.value)[0];
+          if (!p) return '';
+          return `<div style="color:#8b949e;margin-bottom:2px">${params[0].axisValueLabel}</div><div style="font-weight:600">${p.marker} ${p.seriesName}: ${Math.round(p.value).toLocaleString()} ${unit}</div>`;
+        }},
+        legend: { type: 'scroll', top: 0, icon: 'none', itemGap: 12, selectedMode: false, data: seriesNames.map((name, i) => ({ name, textStyle: { color: drillFuel ? PALETTE[i % PALETTE.length] : fuelColor(name), fontSize: 11 } })) },
+        grid: { left: 60, right: 20, top: 35, bottom: 25 },
+        xAxis: { type: 'category', data: xLabels, boundaryGap: false, axisLabel: { rotate: intraday ? 45 : 0, fontSize: intraday ? 10 : 12 } },
+        yAxis: { type: 'value', min: 0, name: unit, nameTextStyle: { color: '#8b949e', fontSize: 11 }, axisLabel: { formatter: v => v >= 1000 ? (v/1000).toFixed(0) + 'k' : v } },
+        dataZoom: dataZoomConfig(intraday),
+        series,
+        animationDuration: 600,
+        animationEasing: 'cubicOut',
+      }, true);
+
+      // Click: fuel view -> drill into fuel; DUID view -> select DUID
+      chart.off('click');
+      chart.on('click', (params) => {
+        if (!params.seriesName) return;
+        if (drillFuel) {
+          const duid = params.seriesName;
+          const idx = crossFilter.duids.indexOf(duid);
+          if (idx >= 0) crossFilter.duids.splice(idx, 1);
+          else crossFilter.duids.push(duid);
+          updateDuidTrigger();
+        } else {
+          crossFilter.fuel = params.seriesName;
+        }
+        renderAll();
+      });
+
+      // KPIs
+      const uniqueIntervals = intraday ? xKeys.length : [...new Set(data.map(d => d.date))].length;
+      const totalGen = data.reduce((s, d) => s + d.total_mw, 0) / (uniqueIntervals || 1);
+      document.getElementById('kpiGen').textContent = Math.round(totalGen).toLocaleString();
+      document.getElementById('kpiGenSub').textContent = intraday ? 'Average MW' : 'Average MWh/day';
+
+      const topFuel = Object.entries(seriesTotals).sort((a, b) => b[1] - a[1])[0];
+      if (topFuel) {
+        document.getElementById('kpiTopFuel').textContent = topFuel[0];
+        const avgLabel = intraday ? 'MW avg' : 'MWh/day avg';
+        document.getElementById('kpiTopFuelSub').textContent = `${Math.round(topFuel[1] / (uniqueIntervals || 1)).toLocaleString()} ${avgLabel}`;
+      }
+
+      // Latest MW: latest 5-min reading, respects region/fuel/DUID filters but ignores date
+      const region = document.getElementById("regionFilter").value || crossFilter.region;
+      const fuel = document.getElementById("fuelFilter").value || crossFilter.fuel;
+      const mwFilters = [];
+      if (region) mwFilters.push(`d.Region = '${region}'`);
+      if (fuel) mwFilters.push(`d.FuelSourceDescriptor = '${fuel}'`);
+      if (crossFilter.duids.length) mwFilters.push(`sc.DUID IN (${crossFilter.duids.map(d => `'${d}'`).join(',')})`);
+      const mwWhere = mwFilters.length ? `AND ${mwFilters.join(' AND ')}` : '';
+      const latestMWResult = await runQuery(`
+        SELECT SUM(sc.mw)::DOUBLE AS total_mw, CAST(sc.date AS VARCHAR) AS d, sc.time
+        FROM today.scada_today sc
+        JOIN dim.dim_duid d ON sc.DUID = d.DUID
+        WHERE sc.date = (SELECT MAX(date) FROM today.scada_today)
+          AND sc.time = (SELECT MAX(time) FROM today.scada_today WHERE date = (SELECT MAX(date) FROM today.scada_today))
+          ${mwWhere}
+        GROUP BY sc.date, sc.time`);
+      if (latestMWResult.length) {
+        document.getElementById('kpiLatestMW').textContent = Math.round(latestMWResult[0].total_mw).toLocaleString();
+        document.getElementById('kpiLatestMWSub').textContent = `at ${formatTime(latestMWResult[0].time)}`;
+      }
+    }
+
+    // --- Average Price by Region (line) ---
+    async function renderPrice(seq) {
+      const intraday = isIntradayMode();
+
+      const data = await runQuery(sql.price(intraday));
+      if (seq !== _renderSeq || !data.length) return;
+
+      const { xKeys, xLabels } = buildTimeAxis(data, intraday);
+      const lookup = buildLookup(data,
+        row => intraday ? `${row.date}|${padTime(row.time)}|${row.Region}` : `${row.date}|${row.Region}`,
+        row => row.avg_price
+      );
+
+      const regions = [...new Set(data.map(d => d.Region))].sort();
+
+      const largeModeP = xKeys.length > 2000;
+      const series = regions.map((region, i) => ({
+        name: region,
+        type: 'line',
+        symbol: 'none',
+        lineStyle: { width: largeModeP ? 1 : 2 },
+        emphasis: { focus: 'series', lineStyle: { width: 3 } },
+        triggerLineEvent: true,
+        sampling: 'lttb',
+        large: largeModeP,
+        progressive: largeModeP ? 500 : 0,
+        data: xKeys.map(k => {
+          const v = lookup.get(`${k}|${region}`);
+          return v != null ? Math.round(v * 100) / 100 : null;
+        }),
+      }));
+
+      const chart = getChart('chart-price');
+      chart.setOption({
+        color: PALETTE,
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+        legend: { bottom: 0, textStyle: { fontSize: 11 } },
+        grid: { left: 55, right: 15, top: 15, bottom: intraday ? 55 : 40 },
+        xAxis: { type: 'category', data: xLabels, boundaryGap: false, axisLabel: { rotate: intraday ? 45 : 0, fontSize: intraday ? 10 : 12 } },
+        yAxis: { type: 'value', name: '$/MWh', nameTextStyle: { color: '#8b949e', fontSize: 11 }, axisLabel: { formatter: v => '$' + v } },
+        dataZoom: dataZoomConfig(intraday),
+        series,
+        animationDuration: 600,
+      }, true);
+
+      chart.off('click');
+      chart.on('click', (params) => {
+        if (params.seriesName) {
+          crossFilter.region = crossFilter.region === params.seriesName ? null : params.seriesName;
+          renderAll();
+        }
+      });
+
+      // KPI: avg price
+      const avgPrice = data.reduce((s, d) => s + d.avg_price, 0) / data.length;
+      document.getElementById('kpiPrice').textContent = '$' + avgPrice.toFixed(1);
+
+      // Latest Price: always from latest 5-min reading in today DB
+      // Latest Price: latest 5-min reading, respects region filter but ignores date
+      const regionP = document.getElementById("regionFilter").value || crossFilter.region;
+      const priceWhere = regionP ? `AND p.REGIONID = '${regionP}'` : '';
+      const latestPriceResult = await runQuery(`
+        SELECT AVG(p.price)::DOUBLE AS avg_price, CAST(p.date AS VARCHAR) AS d, p.time
+        FROM today.price_today p
+        WHERE p.date = (SELECT MAX(date) FROM today.price_today)
+          AND p.time = (SELECT MAX(time) FROM today.price_today WHERE date = (SELECT MAX(date) FROM today.price_today))
+          ${priceWhere}
+        GROUP BY p.date, p.time`);
+      if (latestPriceResult.length) {
+        document.getElementById('kpiLatestPrice').textContent = '$' + latestPriceResult[0].avg_price.toFixed(1);
+        document.getElementById('kpiLatestPriceSub').textContent = `at ${formatTime(latestPriceResult[0].time)}`;
+      }
+    }
+
+    // --- Generator Map (geo scatter) ---
+    let australiaMapRegistered = false;
+
+    async function registerAustraliaMap() {
+      if (australiaMapRegistered) return;
+      const resp = await fetch('https://raw.githubusercontent.com/rowanhogan/australian-states/master/states.geojson');
+      const geoJson = await resp.json();
+      echarts.registerMap('australia', geoJson);
+      australiaMapRegistered = true;
+    }
+
+    async function renderMap(seq) {
+      await registerAustraliaMap();
+      if (seq !== _renderSeq) return;
+
+      const intraday = isIntradayMode();
+      const unit = intraday ? 'MW' : 'MWh';
+      const col = intraday ? 'sc.mw' : 'sc.mwh';
+
+      const data = await runQuery(sql.mapScatter(col));
+      if (seq !== _renderSeq || !data.length) return;
+
+      const fuels = [...new Set(data.map(d => d.fuel))].sort();
+      const maxMw = Math.max(...data.map(d => d.mw));
+
+      const series = fuels.map(fuel => ({
+        name: fuel,
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        data: data.filter(d => d.fuel === fuel).map(d => ({
+          value: [d.lon, d.lat, d.mw],
+          duid: d.DUID,
+          region: d.Region,
+          itemStyle: { opacity: 0.85 },
+        })),
+        symbolSize: d => Math.max(5, Math.sqrt(d[2] / maxMw) * 25),
+        itemStyle: { color: fuelColor(fuel) },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(88,166,255,0.5)' }, scale: 1.3 },
+      }));
+
+      const chart = getChart('chart-map');
+      chart.setOption({
+        color: PALETTE,
+        geo: {
+          map: 'australia',
+          roam: true,
+          itemStyle: { areaColor: '#1a1f2e', borderColor: '#30363d', borderWidth: 1 },
+          emphasis: { disabled: true },
+          label: { show: false },
+          zoom: 1.1,
+          center: [134, -28],
+        },
+        tooltip: { trigger: 'item', formatter: p => {
+          if (!p.data?.duid) return '';
+          const d = p.data;
+          return `<div style="font-weight:600">${d.duid}</div><div>${p.seriesName} &middot; ${d.region}</div><div style="margin-top:4px"><b>${Math.round(d.value[2]).toLocaleString()} ${unit}</b></div>`;
+        }},
+        series,
+        animationDuration: 600,
+      }, true);
+
+      chart.off('click');
+      chart.on('click', (params) => {
+        const duid = params.data?.duid;
+        if (duid) {
+          const idx = crossFilter.duids.indexOf(duid);
+          if (idx >= 0) crossFilter.duids.splice(idx, 1);
+          else crossFilter.duids.push(duid);
+          updateDuidTrigger();
+          renderAll();
+        }
+      });
+
+    }
+
+    // =========================================================================
+    // 7. WIRING (filters, CSV, DUID dropdown, renderAll, init)
+    // =========================================================================
+
+    // --- DUID multi-select dropdown ---
+    let allDuids = [];
+
+    function renderDuidList(filter = '') {
+      const list = document.getElementById('duidList');
+      list.innerHTML = '';
+      const lc = filter.toLowerCase();
+      const regionVal = document.getElementById("regionFilter").value;
+      const fuelVal = document.getElementById("fuelFilter").value;
+      const filtered = allDuids.filter(d =>
+        d.DUID.toLowerCase().includes(lc) &&
+        (!regionVal || d.Region === regionVal) &&
+        (!fuelVal || d.fuel === fuelVal)
+      );
+      for (const d of filtered.slice(0, 150)) {
+        const label = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = crossFilter.duids.includes(d.DUID);
+        cb.addEventListener('change', () => {
+          if (cb.checked) { if (!crossFilter.duids.includes(d.DUID)) crossFilter.duids.push(d.DUID); }
+          else { crossFilter.duids = crossFilter.duids.filter(x => x !== d.DUID); }
+          updateDuidTrigger();
+          renderAll();
+        });
+        label.append(cb, ` ${d.DUID} (${d.Region}, ${d.fuel})`);
+        list.append(label);
+      }
+    }
+
+    function updateDuidTrigger() {
+      const btn = document.getElementById('duidTrigger');
+      btn.textContent = crossFilter.duids.length ? `${crossFilter.duids.length} selected` : 'All DUIDs';
+    }
+
+    document.getElementById('duidTrigger').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById('duidPanel');
+      const isOpen = panel.classList.toggle('open');
+      if (isOpen) {
+        document.getElementById('duidSearch').value = '';
+        renderDuidList();
+        document.getElementById('duidSearch').focus();
+      }
+    });
+    document.getElementById('duidPanel').addEventListener('click', e => e.stopPropagation());
+    document.addEventListener('click', () => { document.getElementById('duidPanel').classList.remove('open'); document.querySelectorAll('.dd-panel.open').forEach(p => p.classList.remove('open')); });
+    document.getElementById('duidSearch').addEventListener('input', e => renderDuidList(e.target.value));
+
+    // --- Tab switching ---
+    for (const btn of document.querySelectorAll('.tab-btn')) {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        document.getElementById('view-dashboard').style.display = tab === 'dashboard' ? '' : 'none';
+        document.getElementById('view-analyze').style.display = tab === 'analyze' ? '' : 'none';
+      });
+    }
+
+    // --- Analyze: dropdown open/close ---
+    function setupDropdown(triggerId, panelId) {
+      const trigger = document.getElementById(triggerId);
+      const panel = document.getElementById(panelId);
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Close other panels
+        document.querySelectorAll('.dd-panel.open').forEach(p => { if (p !== panel) p.classList.remove('open'); });
+        panel.classList.toggle('open');
+      });
+      panel.addEventListener('click', e => e.stopPropagation());
+    }
+    setupDropdown('measTrigger', 'measPanel');
+    setupDropdown('dimTrigger', 'dimPanel');
+
+    function updateMeasTrigger() {
+      const parts = [];
+      if (document.getElementById('measGeneration').checked) parts.push('Generation');
+      if (document.getElementById('measPrice').checked) parts.push('Price');
+      document.getElementById('measTrigger').textContent = parts.length ? parts.join(', ') : 'None selected';
+    }
+
+    function updateDimTrigger() {
+      const parts = ['Date'];
+      if (document.getElementById('dimTime').checked) parts.push('Time');
+      if (document.getElementById('dimDUID').checked) parts.push('DUID');
+      if (document.getElementById('dimFuel').checked) parts.push('Fuel');
+      if (document.getElementById('dimRegion').checked) parts.push('Region');
+      document.getElementById('dimTrigger').textContent = parts.join(', ');
+    }
+
+    // --- Analyze: read checkboxes ---
+    function getAnalyzeOptions() {
+      return {
+        measures: {
+          generation: document.getElementById('measGeneration').checked,
+          price: document.getElementById('measPrice').checked,
+        },
+        dimensions: {
+          time: document.getElementById('dimTime').checked,
+          duid: document.getElementById('dimDUID').checked,
+          fuel: document.getElementById('dimFuel').checked,
+          region: document.getElementById('dimRegion').checked,
+        },
+      };
+    }
+
+    // --- Analyze: query builder ---
+    function buildAnalyzeSQL(limit) {
+      const { measures, dimensions } = getAnalyzeOptions();
+      const hasGen = measures.generation;
+      const hasPrice = measures.price;
+      const raw = dimensions.time; // time dimension = 5-min raw, else daily
+
+      // Build SELECT columns, GROUP BY, ORDER BY
+      const selectCols = ['CAST(sc.date AS VARCHAR) AS date'];
+      const groupCols = ['sc.date'];
+      const orderCols = ['sc.date'];
+
+      // For price-only mode, use p. alias
+      const selDate = hasGen ? 'CAST(sc.date AS VARCHAR) AS date' : 'CAST(p.date AS VARCHAR) AS date';
+      const grpDate = hasGen ? 'sc.date' : 'p.date';
+
+      const sel = [selDate];
+      const grp = [grpDate];
+      const ord = [grpDate];
+
+      if (raw) {
+        const timeAlias = hasGen ? 'sc' : 'p';
+        sel.push(`lpad(CAST(${timeAlias}.time AS VARCHAR), 4, '0') AS time`);
+        grp.push(`${timeAlias}.time`);
+        ord.push(`${timeAlias}.time`);
+      }
+
+      if (dimensions.duid && hasGen) { sel.push('sc.DUID'); grp.push('sc.DUID'); ord.push('sc.DUID'); }
+      if (dimensions.fuel && hasGen) { sel.push('d.FuelSourceDescriptor AS fuel'); grp.push('d.FuelSourceDescriptor'); }
+      if (dimensions.region) {
+        if (hasGen) { sel.push('d.Region AS region'); grp.push('d.Region'); }
+        else { sel.push('p.REGIONID AS region'); grp.push('p.REGIONID'); }
+      }
+
+      // Measures
+      if (hasGen) {
+        if (raw) sel.push('ROUND(SUM(sc.mw)::DOUBLE, 2) AS mw');
+        else sel.push('ROUND(SUM(sc.mwh)::DOUBLE, 2) AS mwh');
+      }
+      if (hasPrice) {
+        sel.push('ROUND(AVG(p.price)::DOUBLE, 2) AS price');
+      }
+
+      // FROM clause
+      let from;
+      if (hasGen && hasPrice) {
+        const scView = raw ? 'v_scada' : 'v_scada_daily';
+        const prView = raw ? 'v_price' : 'v_price_daily';
+        const timeJoin = raw ? 'AND sc.time = p.time' : '';
+        from = `${scView} sc
+          JOIN dim.dim_calendar c ON c.date = sc.date
+          JOIN dim.dim_duid d ON sc.DUID = d.DUID
+          LEFT JOIN ${prView} p ON sc.date = p.date ${timeJoin} AND d.Region = p.REGIONID`;
+      } else if (hasGen) {
+        const scView = raw ? 'v_scada' : 'v_scada_daily';
+        from = `${scView} sc
+          JOIN dim.dim_calendar c ON c.date = sc.date
+          JOIN dim.dim_duid d ON sc.DUID = d.DUID`;
+      } else {
+        const prView = raw ? 'v_price' : 'v_price_daily';
+        from = `${prView} p
+          JOIN dim.dim_calendar c ON c.date = p.date`;
+      }
+
+      // WHERE
+      const where = hasGen ? sql.whereScada() : sql.wherePrice();
+
+      const inner = `SELECT ${sel.join(', ')}\nFROM ${from}\nWHERE ${where}\nGROUP BY ${grp.join(', ')}\nORDER BY ${ord.join(', ')}`;
+
+      if (limit) return `SELECT * FROM (${inner}) LIMIT ${limit}`;
+      return inner;
+    }
+
+    // --- Analyze: ensure data loaded ---
+    async function ensureAnalyzeData() {
+      const { dimensions } = getAnalyzeOptions();
+      if (dimensions.time) {
+        await ensureAllPeriods();
+      } else {
+        if (!aggLoaded) await loadDailyAggDatabase();
+      }
+    }
+
+    // --- Analyze: preview ---
+    async function analyzePreview() {
+      const { measures } = getAnalyzeOptions();
+      if (!measures.generation && !measures.price) {
+        document.getElementById('analyzeInfo').textContent = 'Select at least one measure.';
+        return;
+      }
+
+      const btn = document.getElementById('analyzePreview');
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      const info = document.getElementById('analyzeInfo');
+      const table = document.getElementById('analyzeTable');
+      table.innerHTML = '';
+      info.textContent = '';
+
+      try {
+        await ensureAnalyzeData();
+        setStatus("Previewing...", "loading");
+        const previewSql = buildAnalyzeSQL(500);
+        const rows = await runQuery(previewSql);
+
+        if (!rows.length) {
+          info.textContent = 'No data found for the selected filters.';
+          setStatus(window._cutoffCached || "Connected", "connected");
+          return;
+        }
+
+        const cols = Object.keys(rows[0]);
+        let html = '<thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+        for (const row of rows) {
+          html += '<tr>' + cols.map(c => `<td>${row[c] ?? ''}</td>`).join('') + '</tr>';
+        }
+        html += '</tbody>';
+        table.innerHTML = html;
+
+        const countSql = `SELECT COUNT(*) AS cnt FROM (${buildAnalyzeSQL(null)})`;
+        const countResult = await runQuery(countSql);
+        const total = countResult[0]?.cnt || rows.length;
+        info.textContent = rows.length < total
+          ? `Showing ${rows.length} of ${Number(total).toLocaleString()} rows`
+          : `${Number(total).toLocaleString()} rows`;
+
+        setStatus(window._cutoffCached || "Connected", "connected");
+      } catch (e) {
+        if (e.message && e.message.includes('Out of Memory')) {
+          info.textContent = 'Out of memory. Apply filters or reduce the date range.';
+        } else {
+          info.textContent = 'Error: ' + e.message;
+        }
+        setStatus("Query error", "error");
+        console.error('[Analyze]', e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Preview';
+      }
+    }
+
+    // --- Analyze: download ---
+    async function analyzeDownload() {
+      const { measures } = getAnalyzeOptions();
+      if (!measures.generation && !measures.price) {
+        alert('Select at least one measure.');
+        return;
+      }
+
+      const btn = document.getElementById('analyzeDownload');
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+
+      try {
+        await ensureAnalyzeData();
+        btn.textContent = 'Exporting...';
+        setStatus("Exporting CSV...", "loading");
+        const exportSql = buildAnalyzeSQL(1000000);
+        const { from, to } = getDateRange();
+        const filename = `energy_export_${from}_${to}.csv`;
+        const rowCount = await downloadCSVDirect(exportSql, filename);
+        setStatus(`Exported ${rowCount.toLocaleString()} rows`, "connected");
+        if (rowCount >= 1000000) {
+          alert('Export capped at 1,000,000 rows. Apply filters or reduce the date range for complete data.');
+        }
+      } catch (e) {
+        if (e.message && e.message.includes('Out of Memory')) {
+          setStatus("Export failed: out of memory", "error");
+          alert('Out of memory. Apply filters (region, fuel, DUID) or reduce the date range.');
+        } else {
+          setStatus("CSV export error: " + e.message, "error");
+        }
+        console.error('[Analyze CSV]', e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Download CSV';
+      }
+    }
+
+    document.getElementById('analyzePreview').addEventListener('click', analyzePreview);
+    document.getElementById('analyzeDownload').addEventListener('click', analyzeDownload);
+    for (const id of ['measGeneration', 'measPrice']) {
+      document.getElementById(id).addEventListener('change', () => { updateMeasTrigger(); clearAnalyzePreview(); });
+    }
+    for (const id of ['dimTime', 'dimDUID', 'dimFuel', 'dimRegion']) {
+      document.getElementById(id).addEventListener('change', () => { updateDimTrigger(); clearAnalyzePreview(); });
+    }
+
+    // --- Filter population ---
+    async function populateFilters() {
+      const regions = await runQuery(sql.regions);
+      const fuels = await runQuery(sql.fuels);
+      const regionSelect = document.getElementById("regionFilter");
+      for (const r of regions) regionSelect.add(new Option(r.Region, r.Region));
+      const fuelSelect = document.getElementById("fuelFilter");
+      for (const f of fuels) fuelSelect.add(new Option(f.fuel, f.fuel));
+      allDuids = await runQuery(sql.allDuids);
+
+      // Set date range defaults: last 3 days up to max date in data
+      const maxDateResult = await runQuery("SELECT CAST(MAX(date) AS VARCHAR) AS d FROM today.scada_today");
+      const minDateResult = await runQuery("SELECT CAST(MIN(date) AS VARCHAR) AS d FROM dim.dim_calendar");
+      const maxDate = maxDateResult[0].d;
+      const minDate = minDateResult[0].d;
+      const fromDate = new Date(maxDate);
+      fromDate.setDate(fromDate.getDate() - 3);
+      document.getElementById("dateTo").value = maxDate;
+      document.getElementById("dateTo").min = minDate;
+      document.getElementById("dateTo").max = maxDate;
+      document.getElementById("dateFrom").value = fromDate.toISOString().split('T')[0];
+      document.getElementById("dateFrom").min = minDate;
+      document.getElementById("dateFrom").max = maxDate;
+    }
+
+    // --- Filter change listeners ---
+    function clearAnalyzePreview() {
+      document.getElementById('analyzeTable').innerHTML = '';
+      document.getElementById('analyzeInfo').textContent = '';
+    }
+
+    for (const id of ["dateFrom", "dateTo"]) {
+      document.getElementById(id).addEventListener("change", () => {
+        crossFilter.fuel = null;
+        crossFilter.region = null;
+        crossFilter.duids = [];
+        updateDuidTrigger();
+        clearQueryCache();
+        clearAnalyzePreview();
+
+        renderAll();
+      });
+    }
+
+    for (const id of ["regionFilter", "fuelFilter"]) {
+      document.getElementById(id).addEventListener("change", () => {
+        crossFilter.fuel = null;
+        crossFilter.region = null;
+        crossFilter.duids = [];
+        updateDuidTrigger();
+        clearAnalyzePreview();
+
+        renderAll();
+      });
+    }
+
+    // --- Render all ---
+    async function renderAll() {
+      const seq = ++_renderSeq;
+      if (!window._cutoffCached) setStatus("Querying...", "loading");
+      document.querySelector('.charts').classList.add('loading');
+      updateFilterTags();
+      try {
+        if (isIntradayMode()) {
+          const { from, to } = getDateRange();
+          await ensurePeriodsForRange(from, to);
+        }
+        await Promise.all([renderGeneration(seq), renderPrice(seq), renderMap(seq),
+          runQuery(sql.generatorCount()).then(r => { if (seq === _renderSeq && r.length) document.getElementById('kpiGens').textContent = r[0].cnt.toLocaleString(); })
+        ]);
+        if (seq !== _renderSeq) return;
+        document.querySelector('.charts').classList.remove('loading');
+        if (!window._cutoffCached) {
+          const cutoffResult = await runQuery(sql.cutoff);
+          if (seq !== _renderSeq) return;
+          if (cutoffResult.length && cutoffResult[0].last_update) {
+            const updated = new Date(cutoffResult[0].last_update).toLocaleString("en-AU", { timeZone: "Australia/Brisbane", dateStyle: "medium", timeStyle: "short" });
+            window._cutoffCached = `${updated} AEST`;
+          }
+        }
+        setStatus(window._cutoffCached || "Connected", "connected");
+      } catch (e) {
+        setStatus("Query error: " + e.message, "error");
+        console.error(e);
+      }
+    }
+
+    // --- Init ---
+    try {
+      await initDuckDB();
+      await populateFilters();
+      await renderAll();
+      // Load year databases in background, then silently refresh
+      loadDailyAggDatabase().then(() => { clearQueryCache(); renderAll(); }).catch(e => console.warn('[OPFS] Agg load failed:', e));
+    } catch (e) {
+      setStatus("Error: " + e.message, "error");
+      console.error(e);
+    }
+  </script>
+</body>
+</html>
