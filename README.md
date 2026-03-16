@@ -4,23 +4,18 @@ Real-time dashboard for Australia's National Electricity Market (NEM), powered b
 
 **Live:** [nemtracker.github.io](https://nemtracker.github.io)
 
+This repo is the dashboard-only subset of [analytics-as-code](https://github.com/djouallah/analytics-as-code), which handles the full pipeline: data ingestion, transformation (dbt-duckdb), and storage (Iceberg REST catalog). This repo only imports the processed data and serves the dashboard.
+
 ## How It Works
 
-- A GitHub Actions workflow imports data from an Iceberg REST catalog every 30 minutes
+- A GitHub Actions workflow imports data from the Iceberg catalog every 30 minutes
 - Data is exported as compact DuckDB files and deployed to GitHub Pages
-- The dashboard loads these files in the browser via DuckDB-WASM and queries them client-side
-- No backend API — everything runs in your browser
-
-## Architecture
-
-| Iceberg Catalog | → | Import (every 30 min) | → | GitHub Pages | → | DuckDB-WASM Dashboard |
-|:---------------:|---|:---------------------:|---|:------------:|---|:---------------------:|
-| *persistent data* | | *Iceberg → native DuckDB files* | | *static file hosting* | | *client-side queries in browser* |
+- The dashboard loads these files in the browser via DuckDB-WASM — no backend API
 
 ## Data Refresh
 
-- **Every 30 minutes:** Intraday data (today's SCADA + prices) is refreshed
-- **Daily at 6am AEST:** Full historical refresh including all dimensions and half-year data splits
+- **Every 30 minutes:** Intraday data (today's SCADA + prices)
+- **Daily at 6am AEST:** Full historical refresh including dimensions and half-year data splits
 
 ## Project Structure
 
@@ -44,5 +39,3 @@ Requires three GitHub Actions secrets:
 | `ICEBERG_REST_ENDPOINT` | REST catalog URL |
 | `ICEBERG_TOKEN` | Bearer token for catalog auth |
 | `ICEBERG_WAREHOUSE` | Warehouse path in the catalog |
-
-Data processing (ingestion + transformation via dbt) runs in a separate repository. This repo is read-only — it only imports and visualizes.
