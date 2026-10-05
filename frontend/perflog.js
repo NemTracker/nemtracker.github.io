@@ -12,9 +12,9 @@
 // Timestamps are absolute (performance.timeOrigin + now) so worker and page events line up.
 // =============================================================================
 
-// Stamped at deploy (build.yml: the git sha; fabric/build.mjs: sha + build time). Shown in the
+// Stamped at deploy (build.yml: the git sha; fabric_app/build.mjs: sha + build time). Shown in the
 // Logs tab so a cached bundle is obvious.
-export const BUILD = 'b2572d0';
+export const BUILD = '21697e4';
 
 const CHANNEL = 'perflog-http';
 const MAX_EVENTS = 5000;
