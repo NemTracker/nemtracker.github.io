@@ -36,7 +36,7 @@
 // the compiler, which turns a query into DAX and the DAX into SQL over the data's views.
 // =============================================================================
 
-export { createModel as connect } from '../semantic/compiler.js?v=7982a20';
+export { createModel as connect } from '../semantic/compiler.js?v=69ecc69';
 
 export function createQueries(page) {
   const { UNKNOWN, ROOFTOP, shiftDate } = page;

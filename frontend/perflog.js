@@ -14,7 +14,7 @@
 
 // Stamped at deploy (build.yml: the git sha; fabric_app/common/build.mjs: sha + build time). Shown in the
 // Logs tab so a cached bundle is obvious.
-export const BUILD = '7982a20';
+export const BUILD = '69ecc69';
 
 const CHANNEL = 'perflog-http';
 const MAX_EVENTS = 5000;

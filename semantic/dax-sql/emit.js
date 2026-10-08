@@ -12,9 +12,9 @@
 // its expanded table (joined from the scan's table through the relationships, or read off
 // the foreign key when the relationship relies on referential integrity), and the filters
 // that reach it over bidirectional or many-to-many relationships, as semi-joins.
-import * as ir from './ir.js?v=7982a20';
-import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=7982a20';
-import { semantic } from './errors.js?v=7982a20';
+import * as ir from './ir.js?v=69ecc69';
+import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=69ecc69';
+import { semantic } from './errors.js?v=69ecc69';
 
 const lc = s => String(s).toLowerCase();
 
@@ -555,9 +555,22 @@ export class Emitter {
       this.fusions.push(fusion);
       let sql;
       try { sql = this.scalar({ ...x, shared: false }, new Map()); } finally { this.fusions.pop(); this.inCte = false; }
+      const mark = this.ctes.length;
       const groups = fusion.finish();
       const from = groups.length ? ` FROM ${groups.map(g => g.alias).join(' CROSS JOIN ')}` : '';
-      this.ctes.push(`${name} AS ${this.d.materialized}(SELECT ${sql} AS v${from})`);
+      const body = `(SELECT ${sql} AS v${from})`;
+      // The same value (its CTEs and its SELECT, up to their names) named again elsewhere in
+      // the query, through another measure: the CTE already written.
+      const own = new Map(groups.map((g, i) => [g.alias, `g${i}`]));
+      const key = `shared|${canonical(renameAliases([...this.ctes.slice(mark), body].join('; '), own))}`;
+      const same = this.memo.get(key);
+      if (same) {
+        this.ctes.length = mark;
+        name = same;
+      } else {
+        this.ctes.push(`${name} AS ${this.d.materialized}${body}`);
+        this.memo.set(key, name);
+      }
       this.memo.set(x, name);
     }
     return `(SELECT v FROM ${name})`;
