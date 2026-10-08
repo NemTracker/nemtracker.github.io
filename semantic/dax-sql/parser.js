@@ -14,8 +14,8 @@
 // A query: { defines: [...], evaluates: [{ e, order: [{ e, desc }], start: [value] }] } where a
 // define is
 //   { kind:'measure'|'column', table, name, e } | { kind:'var'|'table', name, e }
-import { lex } from './lexer.js?v=8eb7c2d';
-import { syntax } from './errors.js?v=8eb7c2d';
+import { lex } from './lexer.js?v=9ab8773';
+import { syntax } from './errors.js?v=9ab8773';
 
 // Words that cannot be a bare name. (ASC and DESC can: they are arguments of TOPN, RANKX.)
 const KEYWORDS = new Set(['VAR', 'RETURN', 'EVALUATE', 'DEFINE', 'MEASURE', 'ORDER', 'BY', 'IN', 'NOT', 'START']);
