@@ -10,7 +10,7 @@
 // render per animation frame).
 // =============================================================================
 
-import { perf, BUILD } from './perflog.js?v=d35dcf5';
+import { perf, BUILD } from './perflog.js?v=8eb7c2d';
 
 const _pageStart = performance.timeOrigin;
 let _logsFrame = 0;
