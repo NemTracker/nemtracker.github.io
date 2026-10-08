@@ -11,7 +11,7 @@
 // Besides tables of the lakehouse (an entity partition), a table can be calculated (a DAX
 // table expression, `calc`) or a calculation group (`calcGroup`: its items); `roles` hold the
 // row-level security filters of each role.
-import { semantic } from './errors.js?v=83b8a2f';
+import { semantic } from './errors.js?v=d6bfc74';
 
 const TYPES = { string: 'string', int64: 'int', double: 'double', decimal: 'decimal', dateTime: 'datetime',
   boolean: 'bool', binary: 'string', variant: 'variant', unknown: 'variant' };

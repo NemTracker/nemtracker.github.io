@@ -15,13 +15,13 @@
 // ALL and the other modifiers, then the filters, each replacing what the context said about
 // its columns unless it is KEEPFILTERS); a measure is its expression under CALCULATE; an
 // aggregate is a scan of its table under the ctx of where it stands.
-import { parseExpression, parseQuery } from './parser.js?v=83b8a2f';
-import { DaxError, semantic, unsupported } from './errors.js?v=83b8a2f';
-import { Ctx, EMPTY_CTX, narrow } from './context.js?v=83b8a2f';
-import { isDateKey } from './model.js?v=83b8a2f';
-import * as ir from './ir.js?v=83b8a2f';
-import { dateLit, rowsTable } from './ir.js?v=83b8a2f';
-import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=83b8a2f';
+import { parseExpression, parseQuery } from './parser.js?v=d6bfc74';
+import { DaxError, semantic, unsupported } from './errors.js?v=d6bfc74';
+import { Ctx, EMPTY_CTX, narrow } from './context.js?v=d6bfc74';
+import { isDateKey } from './model.js?v=d6bfc74';
+import * as ir from './ir.js?v=d6bfc74';
+import { dateLit, rowsTable } from './ir.js?v=d6bfc74';
+import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=d6bfc74';
 
 const lc = s => String(s).toLowerCase();
 
