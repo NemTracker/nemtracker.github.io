@@ -1,7 +1,7 @@
 // DuckDB (1.1 and later; tested on 1.5).
-import { Dialect } from './base.js?v=9ab8773';
-import { unsupported } from '../errors.js?v=9ab8773';
-import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=9ab8773';
+import { Dialect } from './base.js?v=cfb1f29';
+import { unsupported } from '../errors.js?v=cfb1f29';
+import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=cfb1f29';
 
 const UNIT_SQL = { day: 'DAY', week: 'WEEK', month: 'MONTH', quarter: 'QUARTER', year: 'YEAR', hour: 'HOUR', minute: 'MINUTE', second: 'SECOND' };
 
