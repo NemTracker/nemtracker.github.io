@@ -112,7 +112,7 @@
 // p<YYYY>_h<N>), so a host that ships its own data.js keeps this file and model.bim.
 // =============================================================================
 
-import { withViews } from '../storage/views.js?v=c84a39b';
+import { withViews } from '../storage/views.js?v=ce2bedf';
 
 // The model, fetched next to this file, with this file's ?v= (the Fabric build's cache-buster).
 const MODEL = (await (await fetch(new URL('./model.bim' + new URL(import.meta.url).search, import.meta.url))).json()).model;
