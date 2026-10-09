@@ -3,11 +3,11 @@
 //   TABLE      functions that return a table
 //   MODIFIERS  what a function means as a filter argument of CALCULATE when that is not a
 //              filter (ALL removes filters, USERELATIONSHIP changes a relationship)
-import * as scalarFns from './scalar.js?v=afb4e25';
-import * as aggregateFns from './aggregate.js?v=afb4e25';
-import * as tableFns from './table.js?v=afb4e25';
-import * as timeFns from './time.js?v=afb4e25';
-import * as windowFns from './window.js?v=afb4e25';
+import * as scalarFns from './scalar.js?v=cb7e1d8';
+import * as aggregateFns from './aggregate.js?v=cb7e1d8';
+import * as tableFns from './table.js?v=cb7e1d8';
+import * as timeFns from './time.js?v=cb7e1d8';
+import * as windowFns from './window.js?v=cb7e1d8';
 
 export const SCALAR = new Map(Object.entries({ ...scalarFns.scalar, ...aggregateFns.scalar, ...timeFns.scalar, ...windowFns.scalar }));
 export const TABLE = new Map(Object.entries({ ...tableFns.table, ...timeFns.table, ...windowFns.table }));

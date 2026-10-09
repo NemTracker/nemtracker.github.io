@@ -21,21 +21,21 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=afb4e25';
-import { Compiler } from './compiler.js?v=afb4e25';
-import { Emitter } from './emit.js?v=afb4e25';
-import { parseExpression } from './parser.js?v=afb4e25';
-import { DuckDBDialect } from './dialects/duckdb.js?v=afb4e25';
-import { Dialect } from './dialects/base.js?v=afb4e25';
-import { newRow } from './ir.js?v=afb4e25';
-import { DaxError, semantic } from './errors.js?v=afb4e25';
-import { Ctx } from './context.js?v=afb4e25';
+import { Model } from './model.js?v=cb7e1d8';
+import { Compiler } from './compiler.js?v=cb7e1d8';
+import { Emitter } from './emit.js?v=cb7e1d8';
+import { parseExpression } from './parser.js?v=cb7e1d8';
+import { DuckDBDialect } from './dialects/duckdb.js?v=cb7e1d8';
+import { Dialect } from './dialects/base.js?v=cb7e1d8';
+import { newRow } from './ir.js?v=cb7e1d8';
+import { DaxError, semantic } from './errors.js?v=cb7e1d8';
+import { Ctx } from './context.js?v=cb7e1d8';
 
-export { DaxError } from './errors.js?v=afb4e25';
-export { Dialect } from './dialects/base.js?v=afb4e25';
-export { DuckDBDialect } from './dialects/duckdb.js?v=afb4e25';
-export { parseQuery, parseExpression } from './parser.js?v=afb4e25';
-export { Model } from './model.js?v=afb4e25';
+export { DaxError } from './errors.js?v=cb7e1d8';
+export { Dialect } from './dialects/base.js?v=cb7e1d8';
+export { DuckDBDialect } from './dialects/duckdb.js?v=cb7e1d8';
+export { parseQuery, parseExpression } from './parser.js?v=cb7e1d8';
+export { Model } from './model.js?v=cb7e1d8';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 

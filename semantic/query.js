@@ -37,7 +37,7 @@
 // dashboard/fabric_app/vertipaq) gets the query's DAX as it is: no views, no SQL.
 // =============================================================================
 
-import { createCompiler } from './dax-sql/index.js?v=afb4e25';
+import { createCompiler } from './dax-sql/index.js?v=cb7e1d8';
 
 // The model, fetched next to this file, with this file's ?v= (the Fabric build's cache-buster).
 const BIM = await (await fetch(new URL('./model.bim' + new URL(import.meta.url).search, import.meta.url))).json();
