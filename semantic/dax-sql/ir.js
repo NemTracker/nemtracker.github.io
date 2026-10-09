@@ -32,7 +32,7 @@
 //                                    context binds to one value), else none
 //   prefix   { vals, cond, src }     the rows of src after those values, when cond holds
 
-import { semantic } from './errors.js?v=deb0ece';
+import { semantic } from './errors.js?v=b2a73a6';
 
 let nextId = 1;
 export const newRow = (cols, kind = 'table', extra = {}) => ({ id: nextId++, cols, kind, ...extra });
