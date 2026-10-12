@@ -12,7 +12,7 @@
 //                                    filter is on its expanded table (cols are its columns)
 // Removing columns from a filter (ALL, or a new filter on the same column) drops what it says
 // about them and keeps what it says about the others.
-import { distinct, project, filter as filterRows, scan, itemOf, rowOf, newRow } from './ir.js?v=fe04d4b';
+import { distinct, project, filter as filterRows, scan, itemOf, rowOf, newRow } from './ir.js?v=8382808';
 
 export class Ctx {
   constructor(filters = [], mods = null) {
