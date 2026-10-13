@@ -2,7 +2,7 @@
 // queries.js — what each chart of the page asks the semantic model, and the filters those
 // questions are built from
 // =============================================================================
-// A query names the model's fields (semantic_model/model.bim): a column as 'table.column',
+// A query names the model's fields (semantic_model/ossie.yaml): a column as 'table.column',
 // a measure by its name, and says how to group, filter and order them, in the words
 // semantic/query.js knows (it lists them). It writes the query as DAX, and the compiler
 // (dax-sql) the DAX as what the engine runs. A query holds no expression of its own, and the page works no figure out of
@@ -36,7 +36,7 @@
 // semantic/query.js, which turns a query into DAX and the DAX into SQL over the data's views.
 // =============================================================================
 
-export { createModel as connect } from '../semantic/query.js?v=8c999ec';
+export { createModel as connect } from '../semantic/query.js?v=f8c1569';
 
 export function createQueries(page) {
   const { UNKNOWN, ROOFTOP, shiftDate } = page;

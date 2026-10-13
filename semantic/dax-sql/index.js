@@ -1,12 +1,14 @@
-// dax-sql: DAX queries over a Tabular semantic model (TMSL, model.bim, or Apache Ossie with DAX metrics) -> SQL.
+// dax-sql: DAX queries over a Tabular semantic model -> SQL.
 //
 //   import { createCompiler } from 'dax-sql';
-//   const dax = createCompiler(bim, { tableSource: t => `v_${t.name}` });
+//   const dax = createCompiler(model, { tableSource: t => `v_${t.name}` });
 //   const { sql, columns } = dax.compile('EVALUATE SUMMARIZECOLUMNS(...)');
 //
+// `model` is dax-sql's model object (model.js says its shape), which no file is: the readers
+// in formats/ (outside the package) make one from a TMSL model.bim or an Apache Ossie model.
 // Options:
 //   dialect        'duckdb' (the default) or a Dialect instance (see dialects/base.js)
-//   tableSource    (table) => SQL that names a model table's rows; by default its partition's
+//   tableSource    (table) => SQL that names a model table's rows; by default its source's
 //                  entity ("schema"."entity"), else its name
 //   columnNames    'short' (the default: the column or the expression's name) or 'dax'
 //                  ('Table'[Column], [Measure]) for the result's columns
@@ -14,36 +16,35 @@
 //                  the column's type, a function of its SQL ({ int: s => `CAST(${s} AS INTEGER)` })
 //   assumeIntegrity  true: every relationship relies on referential integrity, so a
 //                  dimension's key is read off the fact's foreign key with no join (by
-//                  default only those whose relyOnReferentialIntegrity says so)
+//                  default only those whose assumeIntegrity says so)
 //   blankRows      false: no blank row for a dimension whose keys some fact rows miss (VALUES,
 //                  ALL and SUMMARIZECOLUMNS list it otherwise; this saves a check per table)
 //   user           the value of USERNAME() and USERPRINCIPALNAME()
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=8c999ec';
-import { Compiler } from './compiler.js?v=8c999ec';
-import { Emitter } from './emit.js?v=8c999ec';
-import { parseExpression } from './parser.js?v=8c999ec';
-import { DuckDBDialect } from './dialects/duckdb.js?v=8c999ec';
-import { Dialect } from './dialects/base.js?v=8c999ec';
-import { newRow } from './ir.js?v=8c999ec';
-import { DaxError, semantic } from './errors.js?v=8c999ec';
-import { Ctx } from './context.js?v=8c999ec';
-import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=8c999ec';
+import { Model } from './model.js?v=f8c1569';
+import { Compiler } from './compiler.js?v=f8c1569';
+import { Emitter } from './emit.js?v=f8c1569';
+import { parseExpression } from './parser.js?v=f8c1569';
+import { DuckDBDialect } from './dialects/duckdb.js?v=f8c1569';
+import { Dialect } from './dialects/base.js?v=f8c1569';
+import { newRow } from './ir.js?v=f8c1569';
+import { DaxError, semantic } from './errors.js?v=f8c1569';
+import { Ctx } from './context.js?v=f8c1569';
+import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=f8c1569';
 
-export { DaxError } from './errors.js?v=8c999ec';
-export { Dialect } from './dialects/base.js?v=8c999ec';
-export { DuckDBDialect } from './dialects/duckdb.js?v=8c999ec';
-export { parseQuery, parseExpression } from './parser.js?v=8c999ec';
-export { parseSql, modelRelations } from './sql.js?v=8c999ec';
-export { Model } from './model.js?v=8c999ec';
-export { isOssie, fromOssie } from './ossie.js?v=8c999ec';
+export { DaxError } from './errors.js?v=f8c1569';
+export { Dialect } from './dialects/base.js?v=f8c1569';
+export { DuckDBDialect } from './dialects/duckdb.js?v=f8c1569';
+export { parseQuery, parseExpression } from './parser.js?v=f8c1569';
+export { parseSql, modelRelations } from './sql.js?v=f8c1569';
+export { Model } from './model.js?v=f8c1569';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
-export function createCompiler(bim, options = {}) {
-  const model = bim instanceof Model ? bim : new Model(bim);
+export function createCompiler(input, options = {}) {
+  const model = input instanceof Model ? input : new Model(input);
   const dialect = options.dialect instanceof Dialect ? options.dialect : DIALECTS[options.dialect ?? 'duckdb']?.();
   if (!dialect) throw new DaxError(`unknown dialect ${options.dialect}`);
   const base = new Compiler(model, options);
