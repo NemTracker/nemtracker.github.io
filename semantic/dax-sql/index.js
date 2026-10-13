@@ -21,23 +21,23 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=09facaa';
-import { Compiler } from './compiler.js?v=09facaa';
-import { Emitter } from './emit.js?v=09facaa';
-import { parseExpression } from './parser.js?v=09facaa';
-import { DuckDBDialect } from './dialects/duckdb.js?v=09facaa';
-import { Dialect } from './dialects/base.js?v=09facaa';
-import { newRow } from './ir.js?v=09facaa';
-import { DaxError, semantic } from './errors.js?v=09facaa';
-import { Ctx } from './context.js?v=09facaa';
-import { SqlTranslator, isSql } from './sql.js?v=09facaa';
+import { Model } from './model.js?v=e75bf82';
+import { Compiler } from './compiler.js?v=e75bf82';
+import { Emitter } from './emit.js?v=e75bf82';
+import { parseExpression } from './parser.js?v=e75bf82';
+import { DuckDBDialect } from './dialects/duckdb.js?v=e75bf82';
+import { Dialect } from './dialects/base.js?v=e75bf82';
+import { newRow } from './ir.js?v=e75bf82';
+import { DaxError, semantic } from './errors.js?v=e75bf82';
+import { Ctx } from './context.js?v=e75bf82';
+import { SqlTranslator, isSql } from './sql.js?v=e75bf82';
 
-export { DaxError } from './errors.js?v=09facaa';
-export { Dialect } from './dialects/base.js?v=09facaa';
-export { DuckDBDialect } from './dialects/duckdb.js?v=09facaa';
-export { parseQuery, parseExpression } from './parser.js?v=09facaa';
-export { parseSql } from './sql.js?v=09facaa';
-export { Model } from './model.js?v=09facaa';
+export { DaxError } from './errors.js?v=e75bf82';
+export { Dialect } from './dialects/base.js?v=e75bf82';
+export { DuckDBDialect } from './dialects/duckdb.js?v=e75bf82';
+export { parseQuery, parseExpression } from './parser.js?v=e75bf82';
+export { parseSql } from './sql.js?v=e75bf82';
+export { Model } from './model.js?v=e75bf82';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
