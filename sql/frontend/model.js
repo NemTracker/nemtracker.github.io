@@ -10,7 +10,7 @@
 // renderModel() when it is shown; it is built once.
 // =============================================================================
 
-import { modelLayout, MODEL_CARD } from './draw.js?v=3b696d2';
+import { modelLayout, MODEL_CARD } from './draw.js?v=91e74aa';
 
 const SVG = 'http://www.w3.org/2000/svg';
 let _built = null;
