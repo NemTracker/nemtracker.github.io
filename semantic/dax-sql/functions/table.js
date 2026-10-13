@@ -1,10 +1,10 @@
 // Table functions, the CALCULATE modifiers (ALL and its kind, USERELATIONSHIP, CROSSFILTER),
 // and SUMMARIZECOLUMNS.
-import * as ir from '../ir.js?v=aeea5e4';
-import { rowsTable } from '../ir.js?v=aeea5e4';
-import { Ctx } from '../context.js?v=aeea5e4';
-import { semantic, unsupported } from '../errors.js?v=aeea5e4';
-import { isDesc, filtersTable } from './aggregate.js?v=aeea5e4';
+import * as ir from '../ir.js?v=c5d087d';
+import { rowsTable } from '../ir.js?v=c5d087d';
+import { Ctx } from '../context.js?v=c5d087d';
+import { semantic, unsupported } from '../errors.js?v=c5d087d';
+import { isDesc, filtersTable } from './aggregate.js?v=c5d087d';
 
 const lc = s => String(s).toLowerCase();
 const isModelTableName = (c, ast, env) => ast.k === 'name' && !env.vars.has(lc(ast.name)) && !env.queryTables.has(lc(ast.name)) && c.model.hasTable(ast.name);
@@ -135,21 +135,67 @@ function columnsIn(c, t, asts, env, what) {
 // other (or a column added to it) by position.
 const keyRef = (row, src, r) => (row.kind === 'scan' && typeof r === 'number' && src.cols[r].lineage ? src.cols[r].lineage : r);
 
+// SUMMARIZE(table, columns..., "name", expression, ...). With ROLLUP(columns...), each level
+// of subtotals is the same with fewer of its columns, from the last: its rows are the groups
+// of the columns that stay, the others blank, and ISSUBTOTAL(column) in an expression says
+// whether the level took that column away. ROLLUPGROUP(columns...) in ROLLUP goes as one.
 function summarize(c, args, env) {
   const src = c.table(args[0], env), row = ir.rowOf(src);
-  let i = 1;
-  while (i < args.length && args[i].k === 'col') i++;
-  if (args[i]?.k === 'call' && (args[i].fn === 'ROLLUP' || args[i].fn === 'ROLLUPGROUP')) throw unsupported('ROLLUP in SUMMARIZE (SUMMARIZECOLUMNS with ROLLUPADDISSUBTOTAL is)');
-  const refs = columnsIn(c, src, args.slice(1, i), env, 'SUMMARIZE');
+  const asts = [], roll = [];
+  let i = 1, levels = 0;
+  for (; i < args.length; i++) {
+    const a = args[i];
+    if (a.k === 'col') { asts.push(a); roll.push(-1); continue; }
+    if (a.k !== 'call' || a.fn !== 'ROLLUP') break;
+    for (const x of a.args) {
+      const cols = x.k === 'call' && x.fn === 'ROLLUPGROUP' ? x.args : [x];
+      for (const y of cols) { asts.push(y); roll.push(levels); }
+      levels++;
+    }
+  }
+  const refs = columnsIn(c, src, asts, env, 'SUMMARIZE');
   const keys = refs.map(r => ir.itemOf(row, keyRef(row, src, r)));
-  const grouped = { k: 'group', src, row, keys, items: [], cols: keys.map(k => ({ name: k.name, lineage: k.lineage, t: k.t })), base: null };
   const ext = pairs(args, i, 'SUMMARIZE');
-  if (!ext.length) return grouped;
-  // Its expressions, as ADDCOLUMNS over the groups, each with its group as the filter
-  // context (SUMMARIZE's own context transition) and its row.
-  const grow = ir.rowOf(grouped, 'table');
-  const inner = { ...c.iter(env, grow), ctx: c.transitionRow(env.ctx, grow) };
-  return ir.project(grouped, grow, ext.map(([n, x]) => item(c, n, x, inner)), true);
+  const level = j => {
+    const on = keys.filter((_, n) => roll[n] < j);
+    const grouped = on.length
+      ? { k: 'group', src, row, keys: on, items: [], cols: on.map(k => ({ name: k.name, lineage: k.lineage, t: k.t })), base: null }
+      // No column left: one row, when the table has one.
+      : ir.distinct(ir.project(src, row, []));
+    if (!ext.length) return { grouped, on };
+    // Its expressions, as ADDCOLUMNS over the groups, each with its group as the filter
+    // context (SUMMARIZE's own context transition) and its row. The group is its rows of the
+    // table, not only its values: those rows filter the table (its expanded table, for a
+    // model table's rows) as a table filter, so a filter that replaces or removes a grouping
+    // column's (ALL('Date'[Year]), a filter on a date table's date) still keeps the group's
+    // rows. A level with no column left has all the table's rows. ALLSELECTED, putting back
+    // the groups' shadow, takes them away with the group's values.
+    const grow = ir.rowOf(grouped, 'table');
+    const rolledUp = new Set(keys.filter((_, n) => roll[n] >= j).map(k => k.lineage).filter(Boolean));
+    const frow = ir.rowOf(src);
+    const same = on.map((k, n) => ir.op('eqs', ir.col(frow, keyRef(frow, src, refs[keys.indexOf(k)])), ir.col(grow, n)));
+    const rows = ir.filter(src, frow, same.reduce((a, b) => ir.op('and', a, b), ir.TRUE));
+    let ctx = c.transitionRow(env.ctx, grow);
+    for (const f of [c.tableFilter(rows, env.ctx)].flat().filter(Boolean)) ctx = ctx.add({ ...f, group: grow });
+    const inner = { ...c.iter(env, grow), ctx, rolledUp };
+    return { grouped, on, grow, items: ext.map(([n, x]) => item(c, n, x, inner)) };
+  };
+  if (!levels) {
+    const { grouped, grow, items } = level(0);
+    return ext.length ? ir.project(grouped, grow, items, true) : grouped;
+  }
+  // The levels, the detail first; a column a level took away is blank in its rows.
+  const parts = [];
+  for (let j = levels; j >= 0; j--) {
+    const { grouped, on, grow, items = [] } = level(j);
+    const g = grow ?? ir.rowOf(grouped, 'table');
+    const cols = keys.map(k => {
+      const n = on.indexOf(k);
+      return { name: k.name, expr: n >= 0 ? ir.col(g, n) : ir.lit(null, k.t), lineage: k.lineage, t: k.t };
+    });
+    parts.push(ir.project(grouped, g, [...cols, ...items]));
+  }
+  return { k: 'union', srcs: parts, cols: parts[0].cols, base: null };
 }
 
 function groupBy(c, args, env) {
@@ -177,6 +223,124 @@ function topN(c, args, env) {
   for (let i = 2; i < args.length; i += 2) order.push({ expr: c.scalar(args[i], inner), desc: isDesc(args[i + 1], true) });
   if (!order.length) throw unsupported('TOPN without an order');
   return { k: 'topn', src, row, n, order, cols: src.cols, base: src.base };
+}
+
+// expression, [order], expression, [order] ... from argument `from` on, the order ASC or DESC
+// (or 1, 0, TRUE, FALSE) and `desc` when left out.
+function orderBy(c, args, from, env, desc) {
+  const order = [];
+  for (let i = from; i < args.length; i++) {
+    const expr = c.scalar(args[i], env), d = args[i + 1];
+    const given = d && (d.k === 'num' || d.k === 'bool' || d.k === 'empty' || d.k === 'name' && /^(ASC|DESC)$/i.test(d.name));
+    order.push({ expr, desc: given ? isDesc(d, desc) : desc, t: expr.t });
+    if (given) i++;
+  }
+  return order;
+}
+
+// TOPNSKIP(n, skip, table, order...): the rows after the first `skip`, n of them, in the
+// order (DESC unless it says), ties broken by the rows' other columns. Rows equal in every
+// column are one place in the order, all of them kept.
+function topNSkip(c, args, env) {
+  const n = c.scalar(args[0], env), skip = c.scalar(args[1], env), src = c.table(args[2], env), row = ir.rowOf(src);
+  const order = orderBy(c, args, 3, c.iter(env, row), true);
+  return { k: 'topnskip', src, row, n, skip, order, cols: src.cols, base: src.base };
+}
+
+// The columns two tables join on, as [left position, right position]: those of the same
+// lineage, and those of the same name that both lack one. Those must be of the same kind of
+// data type (DAX's: a variant is none of the others).
+function joinColumns(l, r, what) {
+  const on = [];
+  l.cols.forEach((a, i) => {
+    const j = r.cols.findIndex(b => (a.lineage ? b.lineage === a.lineage : !b.lineage && lc(b.name) === lc(a.name)));
+    if (j < 0) return;
+    const [ka, kb] = [a, r.cols[j]].map(kindOf);
+    if (ka && kb && ka !== kb) throw semantic(`${what}: the join column [${a.name}] has different data types on the two sides (${ka}, ${kb})`);
+    on.push([i, j]);
+  });
+  if (!on.length) throw semantic(`${what}: the tables have no column to join on (the same lineage, or the same name and none)`);
+  return on;
+}
+
+// A column's kind of data type as DAX has it; null for a column of blanks.
+function kindOf(col) {
+  const t = col.dax ?? col.t;
+  return !t || t === 'blank' ? null : ir.isNum(t) ? 'number' : t === 'date' ? 'datetime' : t;
+}
+
+// NATURALINNERJOIN(left, right), NATURALLEFTOUTERJOIN: the pairs of rows equal on the
+// columns they have in common, a blank matching a blank; the left's columns, then the right's
+// others. The outer join keeps a left row that matches none, the right's columns blank.
+function naturalJoin(outer) {
+  return (c, args, env) => {
+    const what = outer ? 'NATURALLEFTOUTERJOIN' : 'NATURALINNERJOIN';
+    const left = c.table(args[0], env), right = c.table(args[1], env);
+    const on = joinColumns(left, right, what);
+    const rest = right.cols.map((_, j) => j).filter(j => !on.some(p => p[1] === j));
+    return { k: 'join', left, right, on, rest, outer, cols: [...left.cols, ...rest.map(j => right.cols[j])], base: null };
+  };
+}
+
+// SUBSTITUTEWITHINDEX(table, "name", indexTable, order...): the rows of table that match a
+// row of indexTable on their common columns (as NATURALINNERJOIN matches them), those columns
+// replaced, at the end, by the matching row's place in indexTable's order (ASC unless it
+// says), from 0. Ties in the order are broken by indexTable's columns.
+function substituteWithIndex(c, args, env) {
+  const src = c.table(args[0], env);
+  if (args[1]?.k !== 'str') throw semantic('SUBSTITUTEWITHINDEX(table, "name", indexTable, expression, [order], ...)');
+  const idx = c.table(args[2], env), row = ir.rowOf(idx);
+  const order = orderBy(c, args, 3, c.iter(env, row), false);
+  const on = joinColumns(src, idx, 'SUBSTITUTEWITHINDEX');
+  const rest = src.cols.map((_, i) => i).filter(i => !on.some(p => p[0] === i));
+  return { k: 'subindex', src, idx, row, on, rest, order, cols: [...rest.map(i => src.cols[i]), { name: args[1].v, lineage: null, t: 'int' }], base: null };
+}
+
+// ADDMISSINGITEMS(showAll columns..., table, groupBy columns..., filter tables...): the rows
+// of the table (a SUMMARIZECOLUMNS'), and a row for each combination of the showAll columns'
+// values that no row of it has, its other columns blank. The values are those the filter
+// context and the filter tables leave the columns, with the blank row: within one table the
+// combinations it holds, across tables every one.
+function addMissingItems(c, args, env) {
+  let i = 0;
+  const show = [];
+  for (; i < args.length && args[i].k === 'col'; i++) show.push(c.modelColumn(args[i], env));
+  if (i >= args.length) throw semantic('ADDMISSINGITEMS(showAll columns, table, groupBy columns)');
+  const src = c.table(args[i++], env);
+  const t = src.k === 'scan' || src.k === 'shared' ? src : { k: 'shared', src, cols: src.cols, base: src.base };
+  const groupBy = [];
+  for (; i < args.length; i++) {
+    const a = args[i];
+    if (a.k === 'call' && (a.fn === 'ROLLUPADDISSUBTOTAL' || a.fn === 'ROLLUPGROUP' || a.fn === 'ROLLUPISSUBTOTAL')) throw unsupported(`${a.fn} in ADDMISSINGITEMS`);
+    if (a.k !== 'col') break;
+    groupBy.push(c.modelColumn(a, env));
+  }
+  const ctx = i < args.length ? c.calculateCtx(args.slice(i), { ...env, rows: [] }) : env.ctx;
+  if (!show.length) return t;
+  const pos = show.map(col => {
+    const p = t.cols.findIndex(x => x.lineage === col);
+    if (p < 0 || !groupBy.includes(col)) throw semantic(`ADDMISSINGITEMS: '${col.table.name}'[${col.name}] is not a column the table groups by`);
+    return p;
+  });
+  // The combinations: each table's, crossed.
+  const byTable = new Map();
+  for (const col of show) {
+    if (!byTable.has(col.table)) byTable.set(col.table, []);
+    byTable.get(col.table).push(col);
+  }
+  const parts = [...byTable].map(([tb, cols]) => ir.values(tb, ctx, cols, (x, y) => c.scan(x, y), blankOf(c, tb, 'VALUES')));
+  const combos = parts.length === 1 ? parts[0] : { k: 'cross', srcs: parts, cols: parts.flatMap(p => p.cols), base: null };
+  const at = show.map(col => [...byTable.values()].flat().indexOf(col));
+  // Those no row of the table has.
+  const crow = ir.rowOf(combos, 'table'), trow = ir.rowOf(t);
+  const has = { k: 'insub', e: at.map(k => ir.col(crow, k)), src: ir.project(t, trow, pos.map(p => ir.itemOf(trow, keyRef(trow, t, p)))), t: 'bool', nn: true };
+  const missing = ir.filter(combos, crow, ir.op('not', has));
+  const mrow = ir.rowOf(missing, 'table');
+  const added = ir.project(missing, mrow, t.cols.map((col, p) => {
+    const k = pos.indexOf(p);
+    return { name: col.name, expr: k >= 0 ? ir.col(mrow, at[k]) : ir.lit(null, col.t), lineage: col.lineage, t: col.t };
+  }));
+  return { k: 'union', srcs: [t, added], cols: t.cols, base: null };
 }
 
 function crossJoin(c, args, env) {
@@ -274,11 +438,20 @@ function keepFiltersTable(c, args, env) { return c.table(args[0], env); }
 
 function filters(c, args, env) { return filtersTable(c, c.modelColumn(args[0], env), env); }
 
-// FIRSTNONBLANK(T[c], expr): the first value of the column for which expr is not blank.
+// FIRSTNONBLANK(T[c], expr): the first value of the column for which expr is not blank. The
+// column is its values in the filter context; a table of one column (FILTER(ALL(T[c]), ...))
+// is those values, the column its lineage.
 function nonBlank(fn) {
   return (c, args, env) => {
-    const col = c.modelColumn(args[0], env);
-    const src = ir.values(col.table, env.ctx, [col], (tb, ctx) => c.scan(tb, ctx));
+    let col, src;
+    if (args[0].k === 'col') {
+      col = c.modelColumn(args[0], env);
+      src = ir.values(col.table, env.ctx, [col], (tb, ctx) => c.scan(tb, ctx));
+    } else {
+      src = c.table(args[0], env);
+      col = src.cols.length === 1 ? src.cols[0].lineage : null;
+      if (!col) throw semantic(`${fn === 'min' ? 'FIRSTNONBLANK' : 'LASTNONBLANK'} takes a column, or a table of one column of the model`);
+    }
     const row = ir.rowOf(src, 'table');
     const e = c.scalar(args[1], c.iter(env, row));
     const kept = ir.filter(src, row, ir.op('not', ir.fn('isblank', [e], 'bool', { nn: true })));
@@ -293,43 +466,94 @@ function nonBlank(fn) {
 // table, the combinations it holds; across tables, all of them), and each expression
 // evaluated with the group's values as filters. A group whose expressions are all blank is
 // left out. With ROLLUPADDISSUBTOTAL, each level of subtotals is the same with fewer keys.
+// Each ROLLUPADDISSUBTOTAL is an axis of its own (a matrix's rows, its columns): within one,
+// the levels drop its columns from the last; across several, every level of one goes with
+// every level of the others (a row total by each column, a column total by each row, the
+// corner).
 function summarizeColumns(c, args, env) {
-  const plain = [], rolls = [], keyCols = [];
+  const plain = [], rolls = [], axes = [], keyCols = [];
   let i = 0;
   for (; i < args.length; i++) {
     const a = args[i];
     if (a.k === 'col' && a.table && c.model.findColumn(a.table, a.name)) { const k = c.modelColumn(a, env); plain.push(k); keyCols.push(k); continue; }
-    if (a.k === 'call' && a.fn === 'ROLLUPADDISSUBTOTAL') { const r = rollup(c, a.args, env); rolls.push(...r); keyCols.push(...r.flatMap(x => x.cols)); continue; }
+    if (a.k === 'call' && a.fn === 'ROLLUPADDISSUBTOTAL') {
+      const r = rollup(c, a.args, env);
+      axes.push(r.map((_, n) => rolls.length + n));
+      rolls.push(...r);
+      keyCols.push(...r.flatMap(x => x.cols));
+      continue;
+    }
     if (a.k === 'call' && a.fn === 'ROLLUPGROUP') { const ks = a.args.map(x => c.modelColumn(x, env)); plain.push(...ks); keyCols.push(...ks); continue; }
     break;
   }
   const filterArgs = [];
   for (; i < args.length && args[i].k !== 'str'; i++) filterArgs.push(args[i]);
   const exprs = pairs(args, i, 'SUMMARIZECOLUMNS');
-  const ctx0 = filterArgs.length ? c.calculateCtx(filterArgs, { ...env, rows: [] }) : env.ctx;
+  const given = filterArgs.length ? c.calculateCtx(filterArgs, { ...env, rows: [] }, true) : null;
+  const ctx0 = given ? autoExist(c, given, env.ctx, []) : env.ctx;
+  const selected = given ?? env.ctx;
+  // Its groups are a shadow filter context on the columns it groups by: their values under
+  // its filters on those columns. A filter on another column narrows the groups (auto-exist)
+  // but not the shadow: ALLSELECTED(Product[Product]) is every product under a filter on
+  // Product[Category]. Those marked NONVISUAL filter the groups and the expressions, but are
+  // not part of that shadow: it covers their columns too, with the values the other filters
+  // leave them, so ALLSELECTED takes them off.
+  const nonvisual = ctx0.filters.filter(f => f.nonvisual);
+  const shadowCols = new Set([...keyCols, ...nonvisual.flatMap(f => f.cols)]);
+  const shadow = { cols: shadowCols, src: null,
+    ctx: new Ctx(selected.filters.filter(f => !f.nonvisual), selected.mods).remove(x => !shadowCols.has(x)) };
   if (new Set(keyCols).size !== keyCols.length) throw semantic('SUMMARIZECOLUMNS groups by the same column twice');
   const keyRow = ir.newRow(keyCols.map(k => ({ name: k.name, lineage: k, t: k.type })), 'key');
+  // The levels: how many of each axis' columns stay, the detail first.
+  let depths = [[]];
+  for (const ax of axes) depths = depths.flatMap(d => Array.from({ length: ax.length + 1 }, (_, n) => [...d, ax.length - n]));
   const levels = [];
-  for (let j = rolls.length; j >= 0; j--) {
-    const on = new Set([...plain, ...rolls.slice(0, j).flatMap(r => r.cols)]);
+  for (const depth of depths) {
+    const kept = axes.flatMap((ax, n) => ax.slice(0, depth[n]));
+    const on = new Set([...plain, ...kept.flatMap(r => rolls[r].cols)]);
     const active = keyCols.filter(k => on.has(k));
-    let ctx = ctx0;
+    // Each level's own keys join its filters' combinations (a subtotal's, without the keys it drops).
+    let ctx = given && active.length ? autoExist(c, given, env.ctx, active) : ctx0;
     for (const k of active) ctx = ctx.add({ kind: 'bind', cols: [k], val: ir.col(keyRow, keyCols.indexOf(k)) });
-    // Its groups are a shadow filter context on the columns it groups by: their values under
-    // its filters.
-    const shadows = keyCols.length ? [...env.shadows, { cols: new Set(keyCols), src: null, ctx: ctx0 }] : env.shadows;
+    const shadows = shadow.cols.size ? [...env.shadows, shadow] : env.shadows;
     const inner = { ...env, ctx, rows: [], grouped: new Set(active), shadows };
     const items = exprs.map(([name, x]) => {
       const ignore = x.k === 'call' && (x.fn === 'IGNORE' || x.fn === 'NONVISUAL') ;
       const expr = c.scalar(ignore ? x.args[0] : x, inner);
       return { name, expr, t: expr.t, ignore: x.k === 'call' && x.fn === 'IGNORE' };
     });
-    levels.push({ active, flags: rolls.map((_, n) => n >= j), items });
+    levels.push({ active, flags: rolls.map((_, n) => !kept.includes(n)), items });
   }
   const cols = [...keyCols.map(k => ({ name: k.name, lineage: k, t: k.type })),
     ...rolls.map(r => ({ name: r.flag, lineage: null, t: 'bool' })),
     ...exprs.map(([name], n) => ({ name, lineage: null, t: levels[0].items[n].t }))];
   return { k: 'sc', keyRow, keyCols, rolls, levels, ctx0, cols, base: null };
+}
+
+// Auto-exist: the filters SUMMARIZECOLUMNS' arguments put on the columns of one table are
+// one filter, the combinations of those columns the table holds under all of them. Removing
+// one column's filter later (REMOVEFILTERS in a measure) leaves the others' columns to the
+// values those combinations have: T[a] = "x" and T[b] IN {1, 2}, without the filter on a,
+// is the values among 1 and 2 that b has in a row where a is "x". The columns it groups by
+// on that table (keys) are part of the combinations, and each group binds its own values: so
+// removing one filter leaves the others to the values they have with that group's key, not
+// with any group's.
+function autoExist(c, ctx, outer, keys) {
+  const byTable = new Map();
+  for (const f of ctx.filters) {
+    if (outer.filters.includes(f) || (f.kind === 'rel' && f.base) || f.nonvisual) continue;
+    const t = f.cols[0].table;
+    if (f.cols.some(x => x.table !== t)) continue;
+    if (!byTable.has(t)) byTable.set(t, []);
+    byTable.get(t).push(f);
+  }
+  for (const [t, fs] of byTable) {
+    if (fs.length < 2) continue;
+    const cols = [...new Set([...fs.flatMap(f => f.cols), ...keys.filter(k => k.table === t)])];
+    const src = ir.values(t, new Ctx(fs, ctx.mods), cols, (tb, x) => c.scan(tb, x), c.blankRowRels(t).length > 0);
+    ctx = new Ctx(ctx.filters.filter(f => !fs.includes(f)), ctx.mods).add({ kind: 'rel', cols, src, idx: cols.map((_, i) => i), base: null });
+  }
+  return ctx;
 }
 
 // ROLLUPADDISSUBTOTAL(col | ROLLUPGROUP(cols), "flag", ...) -> [{ cols, flag }].
@@ -413,6 +637,8 @@ export const table = {
   GENERATE: generate(false), GENERATEALL: generate(true), ROW: rowFn, DATATABLE: dataTable,
   GENERATESERIES: series, CALENDAR: calendar, TREATAS: treatAs, KEEPFILTERS: keepFiltersTable, FILTERS: filters,
   FIRSTNONBLANK: nonBlank('min'), LASTNONBLANK: nonBlank('max'),
+  TOPNSKIP: topNSkip, NATURALINNERJOIN: naturalJoin(false), NATURALLEFTOUTERJOIN: naturalJoin(true),
+  SUBSTITUTEWITHINDEX: substituteWithIndex, ADDMISSINGITEMS: addMissingItems,
 };
 
 export const modifiers = {

@@ -21,21 +21,21 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=aeea5e4';
-import { Compiler } from './compiler.js?v=aeea5e4';
-import { Emitter } from './emit.js?v=aeea5e4';
-import { parseExpression } from './parser.js?v=aeea5e4';
-import { DuckDBDialect } from './dialects/duckdb.js?v=aeea5e4';
-import { Dialect } from './dialects/base.js?v=aeea5e4';
-import { newRow } from './ir.js?v=aeea5e4';
-import { DaxError, semantic } from './errors.js?v=aeea5e4';
-import { Ctx } from './context.js?v=aeea5e4';
+import { Model } from './model.js?v=c5d087d';
+import { Compiler } from './compiler.js?v=c5d087d';
+import { Emitter } from './emit.js?v=c5d087d';
+import { parseExpression } from './parser.js?v=c5d087d';
+import { DuckDBDialect } from './dialects/duckdb.js?v=c5d087d';
+import { Dialect } from './dialects/base.js?v=c5d087d';
+import { newRow } from './ir.js?v=c5d087d';
+import { DaxError, semantic } from './errors.js?v=c5d087d';
+import { Ctx } from './context.js?v=c5d087d';
 
-export { DaxError } from './errors.js?v=aeea5e4';
-export { Dialect } from './dialects/base.js?v=aeea5e4';
-export { DuckDBDialect } from './dialects/duckdb.js?v=aeea5e4';
-export { parseQuery, parseExpression } from './parser.js?v=aeea5e4';
-export { Model } from './model.js?v=aeea5e4';
+export { DaxError } from './errors.js?v=c5d087d';
+export { Dialect } from './dialects/base.js?v=c5d087d';
+export { DuckDBDialect } from './dialects/duckdb.js?v=c5d087d';
+export { parseQuery, parseExpression } from './parser.js?v=c5d087d';
+export { Model } from './model.js?v=c5d087d';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
@@ -48,9 +48,11 @@ export function createCompiler(bim, options = {}) {
   // A calculated column: its expression on a row of its table, in an empty filter context.
   const calc = new Map();
   const calcColumn = col => {
+    // One the query defines (DEFINE COLUMN) was compiled with the query.
+    if (col.query) return col.query;
     let c = calc.get(col);
     if (!c) {
-      const row = newRow(col.table.columns.map(x => ({ name: x.name, lineage: x, t: x.type })), 'scan', { base: col.table });
+      const row = newRow(col.table.columns.filter(x => !x.query).map(x => ({ name: x.name, lineage: x, t: x.type })), 'scan', { base: col.table });
       calc.set(col, { busy: true });
       let ast;
       try { ast = parseExpression(col.expr); } catch (e) {
@@ -111,8 +113,7 @@ export function createCompiler(bim, options = {}) {
   function compileAll(dax) {
     let out = cache.get(dax);
     if (out) return out;
-    const statements = base.query(dax);
-    out = statements.map(s => new Emitter(model, dialect, { ...options, calcColumn, calcTable, security }).query(s));
+    out = base.query(dax, statements => statements.map(s => new Emitter(model, dialect, { ...options, calcColumn, calcTable, security }).query(s)));
     if (cache.size >= 500) cache.clear();
     cache.set(dax, out);
     return out;

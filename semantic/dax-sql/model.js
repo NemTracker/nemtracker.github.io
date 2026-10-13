@@ -11,7 +11,7 @@
 // Besides tables of the lakehouse (an entity partition), a table can be calculated (a DAX
 // table expression, `calc`) or a calculation group (`calcGroup`: its items); `roles` hold the
 // row-level security filters of each role.
-import { semantic } from './errors.js?v=aeea5e4';
+import { semantic } from './errors.js?v=c5d087d';
 
 const TYPES = { string: 'string', int64: 'int', double: 'double', decimal: 'decimal', dateTime: 'datetime',
   boolean: 'bool', binary: 'string', variant: 'variant', unknown: 'variant' };
@@ -115,6 +115,26 @@ export class Model {
     return f;
   }
 
+  // DEFINE COLUMN: a calculated column of a table for the time of one query. The table is
+  // the model's, so the column is there for everything that reads the table's columns (ALL
+  // of the table, context transition, a scan) until dropQueryColumns takes it out again.
+  // `query` computes it: { row, expr } once compiled.
+  addQueryColumn(table, name) {
+    if (table.colMap.has(lc(name))) throw semantic(`DEFINE COLUMN: '${table.name}' already has a column [${name}]`);
+    const col = { table, name, id: `${lc(table.name)}[${lc(name)}]`, type: 'variant', source: name, expr: name,
+      unique: false, dataCategory: null, fieldParameter: false, query: {} };
+    table.columns.push(col);
+    table.colMap.set(lc(name), col);
+    return col;
+  }
+  dropQueryColumns(cols) {
+    for (const col of cols) {
+      const t = col.table, i = t.columns.indexOf(col);
+      if (i >= 0) t.columns.splice(i, 1);
+      if (t.colMap.get(lc(col.name)) === col) t.colMap.delete(lc(col.name));
+    }
+  }
+
   // The relationships as a RelState changes them: [{ rel, active, cross }], cross one of
   // 'single' (one side filters many), 'both', 'none', 'reverse' (many side filters one).
   state(mods) {
@@ -150,6 +170,39 @@ export class Model {
       this._security = s;
     }
     return this._security;
+  }
+
+  // Two join paths along which the rows a role keeps of table `from` reach table `to`, when
+  // one of them crosses a relationship that `state` (a CROSSFILTER) makes filter from its many
+  // side to its one side for the query only; null otherwise. Security moves along the
+  // relationships as securityState says, and the secured rows of that many side filter its
+  // one side. DAX joins the tables that filter a table as a tree, so a second path is an
+  // error: a secured table that filters a fact table is filtered back by it, say. Each path
+  // is the list of its tables.
+  securityPaths(from, to, state) {
+    const edges = [];
+    for (const { rel, active, cross } of this.securityState()) {
+      if (!active || rel.security === 'none') continue;
+      edges.push({ a: rel.to.table, b: rel.from.table, query: false });
+      if (cross === 'both') edges.push({ a: rel.from.table, b: rel.to.table, query: false });
+    }
+    for (const { rel, active, cross } of state) {
+      if (!active || rel.fromCard !== 'many' || rel.toCard !== 'one' || rel.cross !== 'single') continue;
+      if (rel.security === 'both' || cross !== 'both' && cross !== 'reverse') continue;
+      edges.push({ a: rel.from.table, b: rel.to.table, query: true });
+    }
+    if (!edges.some(e => e.query)) return null;
+    const paths = from === to ? [{ path: [from], query: false }] : [];
+    const walk = (t, path, query) => {
+      for (const e of edges) {
+        if (e.a !== t) continue;
+        if (e.b === to) paths.push({ path: [...path, to], query: query || e.query });
+        else if (!path.includes(e.b)) walk(e.b, [...path, e.b], query || e.query);
+      }
+    };
+    walk(from, [from], false);
+    const q = paths.find(p => p.query);
+    return q && paths.length > 1 ? [paths.find(p => p !== q).path, q.path] : null;
   }
 
   // The expanded table of `table`: Map(table name -> [hops]) where a hop is

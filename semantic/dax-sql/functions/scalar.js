@@ -1,9 +1,9 @@
 // Functions of values: logic, math, text, dates, conversion. Each becomes an `fn` node the
 // dialect writes (dialects/base.js lists the names), or a CASE.
-import * as ir from '../ir.js?v=aeea5e4';
-import { semantic, unsupported } from '../errors.js?v=aeea5e4';
-import { dateLit } from '../ir.js?v=aeea5e4';
-import { numberFormat, dateFormat, formatKind, isNamedDate } from '../format.js?v=aeea5e4';
+import * as ir from '../ir.js?v=c5d087d';
+import { semantic, unsupported } from '../errors.js?v=c5d087d';
+import { dateLit } from '../ir.js?v=c5d087d';
+import { numberFormat, dateFormat, formatKind, isNamedDate } from '../format.js?v=c5d087d';
 
 const s = (c, a, env) => c.scalar(a, env);
 const opt = (c, a, env, dflt) => (a && a.k !== 'empty' ? c.scalar(a, env) : dflt);
@@ -58,7 +58,10 @@ function coalesce(c, args, env) {
 
 function divide(c, args, env) {
   const a = s(c, args[0], env), b = s(c, args[1], env), alt = opt(c, args[2], env, null);
-  return ir.fn('divide', alt ? [a, b, alt] : [a, b], 'double');
+  const q = ir.fn('divide', alt ? [a, b, alt] : [a, b], 'double');
+  // A fixed decimal divided by a number is one, as with /.
+  const fixed = a.t === 'decimal' && (b.t === 'int' || b.t === 'double') && (!alt || ['int', 'decimal', 'blank'].includes(alt.t));
+  return fixed ? ir.currency(q) : q;
 }
 
 function isBlank(c, args, env) { return ir.fn('isblank', [s(c, args[0], env)], 'bool', { nn: true }); }
@@ -106,9 +109,9 @@ function weeknum(c, args, env) { return ir.fn('weeknum', [s(c, args[0], env), op
 function search(name) {
   return (c, args, env) => ir.fn(name, [s(c, args[0], env), s(c, args[1], env), opt(c, args[2], env, ir.lit(1)), opt(c, args[3], env, ir.BLANK)], 'int');
 }
+// Every occurrence of the old text, or only the one an instance number gives.
 function substitute(c, args, env) {
-  if (args[3]) throw unsupported('SUBSTITUTE with an instance number');
-  return ir.fn('substitute', args.slice(0, 3).map(x => s(c, x, env)), 'string', { strict: true });
+  return ir.fn('substitute', args.slice(0, args[3] ? 4 : 3).map(x => s(c, x, env)), 'string', { strict: true });
 }
 function concatenate(c, args, env) { return ir.op('concat', s(c, args[0], env), s(c, args[1], env)); }
 function combineValues(c, args, env) { return ir.fn('combinevalues', args.map(x => s(c, x, env)), 'string', { nn: true }); }
@@ -138,6 +141,37 @@ function formatValue(x, fmt) {
   else if (!date && x.t !== 'bool' && (kind === 'date' || isNamedDate(fmt))) x = ir.fn('serial_date', [x], 'datetime', { strict: true });
   if (x.t === 'datetime' || x.t === 'date') return ir.fn('format_date', [x, ir.lit(JSON.stringify(dateFormat(fmt)), 'string')], 'string', { nn: true });
   return ir.fn('format_number', [x, ir.lit(JSON.stringify(numberFormat(fmt)), 'string')], 'string', { nn: true });
+}
+
+// PATH(T[key], T[parent]): the keys from the hierarchy's root down to the row's, joined by
+// "|". It is computed as a calculated column is, over all of T's rows (no filter, no
+// security), once for the pair of columns (ir.paths), and read on the row by its key. A row
+// whose chain of parents never reaches a blank parent (an orphan, a cycle: an error in DAX)
+// has none.
+function path(c, args, env) {
+  if (args.length !== 2) throw semantic('PATH(<id column>, <parent column>)');
+  const key = c.modelColumn(args[0], env, 'PATH: a column'), parent = c.modelColumn(args[1], env, 'PATH: a column');
+  if (key.table !== parent.table) throw semantic('PATH: the id and parent columns must be of the same table');
+  const t = ir.paths(key, parent), row = ir.rowOf(t);
+  const mine = ir.filter(t, row, ir.op('eqs', ir.col(row, 0), s(c, args[0], env)));
+  return ir.agg('single', mine, row, ir.col(row, 1), 'string');
+}
+
+// PATHITEM(path, n[, TEXT | INTEGER]) and PATHITEMREVERSE: the n-th item from the left (the
+// right), blank past the path's end; as text, or as a whole number.
+function pathItem(name) {
+  return (c, args, env) => {
+    if (args.length < 2) throw semantic(`${name.toUpperCase()}(<path>, <position>[, <type>])`);
+    const x = ir.fn(name, [s(c, args[0], env), s(c, args[1], env)], 'string', { strict: true });
+    return pathType(c, args[2], env) === 'int' ? ir.fn('cast', [x, ir.lit('int', 'string')], 'int', { strict: true }) : x;
+  };
+}
+function pathType(c, a, env) {
+  if (!a || a.k === 'empty') return 'string';
+  let n = a.k === 'name' ? { TEXT: 0, INTEGER: 1 }[a.name.toUpperCase()] : undefined;
+  if (n === undefined) { const v = s(c, a, env); n = v.k === 'lit' ? v.v : null; }
+  if (n !== 0 && n !== 1) throw semantic('the type of a path item is TEXT (0) or INTEGER (1)');
+  return n === 1 ? 'int' : 'string';
 }
 
 function blankFn() { return ir.BLANK; }
@@ -176,6 +210,10 @@ export const scalar = {
   EXACT: plain('exact', 'bool', { strict: false, nn: true }), UNICHAR: plain('unichar', 'string'), UNICODE: plain('unicode', 'int'),
   CONTAINSSTRING: plain('containsstring', 'bool', { strict: false, nn: true }),
   CONTAINSSTRINGEXACT: plain('containsstringexact', 'bool', { strict: false, nn: true }), FORMAT: format,
+  // parent-child hierarchies
+  PATH: path, PATHITEM: pathItem('pathitem'), PATHITEMREVERSE: pathItem('pathitemreverse'),
+  PATHLENGTH: plain('pathlength', 'int', { arity: 1, strict: false, nn: true }),
+  PATHCONTAINS: plain('pathcontains', 'bool', { arity: 2, strict: false, nn: true }),
   // dates
   DATE: date, TIME: plain('time', 'datetime'), YEAR: plain('year', 'int'), MONTH: plain('month', 'int'), DAY: plain('day', 'int'),
   HOUR: plain('hour', 'int'), MINUTE: plain('minute', 'int'), SECOND: plain('second', 'int'), QUARTER: plain('quarter', 'int'),

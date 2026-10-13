@@ -1,7 +1,6 @@
 // DuckDB (1.1 and later; tested on 1.5).
-import { Dialect } from './base.js?v=aeea5e4';
-import { unsupported } from '../errors.js?v=aeea5e4';
-import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=aeea5e4';
+import { Dialect } from './base.js?v=c5d087d';
+import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=c5d087d';
 
 const UNIT_SQL = { day: 'DAY', week: 'WEEK', month: 'MONTH', quarter: 'QUARTER', year: 'YEAR', hour: 'HOUR', minute: 'MINUTE', second: 'SECOND' };
 
@@ -11,6 +10,10 @@ export class DuckDBDialect extends Dialect {
   supportsQualify = true;
 
   type(t) { return t === 'double' ? 'DOUBLE' : super.type(t); }
+
+  // The NOCASE collation on one side is the comparison's (and IN's, and a join's). A NULL
+  // with no type takes no collation, so it goes on the side that is text.
+  nocase(a, ...others) { return [`(${a} COLLATE NOCASE)`, ...others]; }
 
   // / divides as DOUBLE already.
   div(a, b) { return `(${a} / ${b})`; }
@@ -36,7 +39,8 @@ export class DuckDBDialect extends Dialect {
   fn(name, a, nodes = []) {
     // A text function given a number reads it as text, as DAX converts it.
     const TEXT = { left: [0], right: [0], mid: [0], len: [0], upper: [0], lower: [0], trim: [0], substitute: [0, 1, 2], replace: [0, 3],
-      search: [0, 1], find: [0, 1], rept: [0], exact: [0, 1], unicode: [0], containsstring: [0, 1], containsstringexact: [0, 1] };
+      search: [0, 1], find: [0, 1], rept: [0], exact: [0, 1], unicode: [0], containsstring: [0, 1], containsstringexact: [0, 1],
+      pathlength: [0], pathitem: [0], pathitemreverse: [0], pathcontains: [0, 1] };
     if (TEXT[name]) a = a.map((v, i) => (TEXT[name].includes(i) && nodes[i] && nodes[i].t !== 'string' && nodes[i].t !== 'blank' ? this.text(v, nodes[i].t) : v));
     const [x, y, z, w] = a;
     switch (name) {
@@ -79,7 +83,18 @@ export class DuckDBDialect extends Dialect {
       case 'upper': return `upper(${x})`;
       case 'lower': return `lower(${x})`;
       case 'trim': return `regexp_replace(trim(${x}), ' {2,}', ' ', 'g')`;
-      case 'substitute': return `replace(${x}, ${y}, ${z})`;
+      case 'substitute': {
+        if (w === undefined) return `replace(${x}, ${y}, ${z})`;
+        // The w-th occurrence only: it starts after the first w pieces of the text split on the
+        // old text, and the w - 1 old texts between them (the text and the old text are bound
+        // once). Unchanged with fewer occurrences.
+        const n = `CAST(trunc(${w}) AS BIGINT)`;
+        const before = `CAST(list_sum([length(dax_e) FOR dax_e IN dax_p[1:${n}]]) + (${n} - 1) * length(dax_s[2]) AS BIGINT)`;
+        const body = `CASE WHEN ${n} < 1 THEN error('SUBSTITUTE: the instance number must be 1 or more')
+          WHEN dax_s[2] = '' OR ${n} >= len(dax_p) THEN dax_s[1]
+          ELSE left(dax_s[1], ${before}) || ${z} || substring(dax_s[1], ${before} + length(dax_s[2]) + 1) END`;
+        return `[[${body} FOR dax_p IN [string_split(dax_s[1], dax_s[2])]][1] FOR dax_s IN [[${x}, ${y}]]][1]`;
+      }
       case 'replace': return `(left(${x}, ${y} - 1) || ${w} || substring(${x}, ${y} + ${z}))`;
       case 'search': case 'find': {
         const low = s => (name === 'search' ? `lower(${s})` : s);
@@ -92,6 +107,11 @@ export class DuckDBDialect extends Dialect {
       case 'unicode': return `unicode(${x})`;
       case 'containsstring': return `contains(lower(COALESCE(${x}, '')), lower(COALESCE(${y}, '')))`;
       case 'containsstringexact': return `contains(COALESCE(${x}, ''), COALESCE(${y}, ''))`;
+      // A path's items: blank or "" is a path of none; a position past either end is blank.
+      case 'pathlength': return `COALESCE(length(string_split(NULLIF(${x}, ''), '|')), 0)`;
+      case 'pathitem': return `CASE WHEN ${y} >= 1 THEN string_split(NULLIF(${x}, ''), '|')[CAST(${y} AS BIGINT)] END`;
+      case 'pathitemreverse': return `CASE WHEN ${y} >= 1 THEN string_split(NULLIF(${x}, ''), '|')[-CAST(${y} AS BIGINT)] END`;
+      case 'pathcontains': return `COALESCE(list_contains(string_split(NULLIF(${x}, ''), '|'), ${y}), FALSE)`;
       case 'combinevalues': return `concat_ws(${x}, ${a.slice(1).map((v, i) => `COALESCE(${nodes[i + 1] ? this.text(v, nodes[i + 1].t) : `CAST(${v} AS VARCHAR)`}, '')`).join(', ')})`;
       case 'format_date': return formatDate(x, JSON.parse(nodes[1].v));
       case 'format_number': return formatNumber(x, JSON.parse(nodes[1].v), nodes[0].t);
@@ -161,13 +181,26 @@ export class DuckDBDialect extends Dialect {
       case 'hasone': return `COALESCE(COUNT(DISTINCT ${x})${f} + MAX(CASE WHEN ${x} IS NULL THEN 1 ELSE 0 END)${f} = 1, FALSE)`;
       case 'product': return `product(${x})${f}`;
       case 'median': return `median(${x})${f}`;
-      case 'pct_inc': return `quantile_cont(${x}, ${extra.k})${f}`;
       case 'stdev_s': return `stddev_samp(${x})${f}`;
       case 'stdev_p': return `stddev_pop(${x})${f}`;
       case 'var_s': return `var_samp(${x})${f}`;
       case 'var_p': return `var_pop(${x})${f}`;
       case 'concat': return `string_agg(COALESCE(${x}, ''), ${extra.delim}${extra.order?.length ? ` ORDER BY ${extra.order.join(', ')}` : ''})${f}`;
-      case 'pct_exc': throw unsupported('PERCENTILE.EXC on DuckDB');
+      // The value at rank k(n - 1) + 1 (INC) or k(n + 1) (EXC) of the n values in order,
+      // between the two around it as that rank is between theirs. The blanks are values too:
+      // they count in n and come first, and a blank on either side of the rank gives blank.
+      // A rank outside 1..n is an error, as in DAX (for EXC, k outside 1/(n + 1)..n/(n + 1));
+      // no values give blank. The sorted values and the rank are bound once.
+      case 'pct_inc': case 'pct_exc': {
+        const i = 'CAST(floor(dax_r) AS BIGINT)', k = `COALESCE(${extra.k}, 0)`;
+        const r = fn === 'pct_inc' ? `${k} * (len(dax_l) - 1) + 1` : `${k} * (len(dax_l) + 1)`;
+        const range = fn === 'pct_inc' ? 'PERCENTILE.INC: k must lie in 0..1' : 'PERCENTILE.EXC: k must lie in 1/(n + 1)..n/(n + 1)';
+        const body = `CASE WHEN len(dax_l) = 0 THEN NULL
+          WHEN dax_r < 1 OR dax_r > len(dax_l) THEN error('${range}')
+          WHEN dax_r = ${i} THEN dax_l[${i}]
+          ELSE dax_l[${i}] + (dax_r - ${i}) * (dax_l[${i} + 1] - dax_l[${i}]) END`;
+        return `[[${body} FOR dax_r IN [${r}]][1] FOR dax_l IN [COALESCE(list(${x} ORDER BY ${x} ASC NULLS FIRST)${f}, [])]][1]`;
+      }
     }
     return super.agg(fn, x);
   }

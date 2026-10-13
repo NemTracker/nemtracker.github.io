@@ -1,7 +1,7 @@
 // Aggregates and iterators, CALCULATE, and the functions that ask about the filter context.
 // An aggregate is { k:'agg' } over a table (a scan of the column's table, for SUM(T[c])).
-import * as ir from '../ir.js?v=aeea5e4';
-import { semantic } from '../errors.js?v=aeea5e4';
+import * as ir from '../ir.js?v=c5d087d';
+import { semantic } from '../errors.js?v=c5d087d';
 
 const lc = s => String(s).toLowerCase();
 const numType = t => (t === 'int' || t === 'decimal' ? t : 'double');
@@ -29,9 +29,12 @@ const column = (fn, type) => (c, args, env) => {
   const { src, row, arg } = overColumn(c, args[0], env);
   return ir.agg(fn, src, row, arg, type(arg.t));
 };
+// MINX and MAXX of text are text, but DAX types them as a variant (`dax`: a value's DAX type
+// where it is not its kind of value). It shows where DAX compares types: the natural joins.
 const iterator = (fn, type) => (c, args, env) => {
   const { src, row, arg } = overTable(c, args, env);
-  return ir.agg(fn, src, row, arg, type(arg.t));
+  const x = ir.agg(fn, src, row, arg, type(arg.t));
+  return (fn === 'min' || fn === 'max') && arg.t === 'string' ? { ...x, dax: 'variant' } : x;
 };
 const same = t => t, num = t => numType(t), dbl = () => 'double', int = () => 'int';
 
@@ -57,10 +60,14 @@ function countRows(c, args, env) {
 }
 
 // DISTINCTCOUNT(T[c]) is COUNTROWS(VALUES(T[c])): the blank row counts, when the table has one.
+// It counts the values of T's rows, though: a filter that comes back to T from a many side
+// keeps the rows whose keys its rows hold, and the blank row that VALUES adds for those it
+// lacks is not one of them.
 function distinctCount(c, args, env) {
   const col = c.modelColumn(args[0], env);
   if (!c.blankRowRels(col.table).length) return column('dcount', int)(c, args, env);
-  return countRows(c, [{ k: 'call', fn: 'VALUES', args: [args[0]] }], env);
+  const src = ir.values(col.table, env.ctx, [col], (tb, ctx) => c.scan(tb, ctx), true, false);
+  return ir.agg('countrows', src, ir.rowOf(src), null, 'int');
 }
 
 function minMax(fn) {
@@ -137,6 +144,13 @@ function isInScope(c, args, env) {
   return ir.lit(env.grouped.has(c.modelColumn(args[0], env)));
 }
 
+// ISSUBTOTAL(T[c]) in an expression of SUMMARIZE: whether its row is a subtotal over the
+// column (a level of ROLLUP without it).
+function isSubtotal(c, args, env) {
+  if (!env.rolledUp) throw semantic('ISSUBTOTAL is only valid in the expressions of SUMMARIZE');
+  return ir.lit(env.rolledUp.has(c.modelColumn(args[0], env)));
+}
+
 // The visible values of a column: one of them, or whether there is exactly one.
 // The values of a column in the filter context (HASONEVALUE, SELECTEDVALUE): its table's rows,
 // or VALUES with the blank row when the table has one.
@@ -173,16 +187,16 @@ export function filtersTable(c, col, env) {
   return ir.distinct(ir.project(src, row, [ir.itemOf(row, col)]));
 }
 
+// LOOKUPVALUE(result, search, value, ..., alternate): the result column on the rows where each
+// search column holds its value, searched without the filter context (row-level security still
+// applies), or the alternate (blank) when it holds no single value.
 function lookupValue(c, args, env) {
   const result = c.modelColumn(args[0], env);
-  let ctx = env.ctx, i = 1;
-  const binds = [];
+  let ctx = env.ctx.removeAll(), i = 1;
   for (; i + 1 < args.length; i += 2) {
     const s = c.modelColumn(args[i], env), v = c.scalar(args[i + 1], env);
-    binds.push({ kind: 'bind', cols: [s], val: v });
+    ctx = ctx.add({ kind: 'bind', cols: [s], val: v });
   }
-  ctx = ctx.remove(x => binds.some(b => b.cols[0] === x));
-  for (const b of binds) ctx = ctx.add(b);
   const alt = i < args.length && args[i].k !== 'empty' ? c.scalar(args[i], env) : ir.BLANK;
   const src = c.scan(result.table, ctx), row = ir.rowOf(src), value = ir.col(row, result);
   return ir.kase([[ir.agg('hasone', src, row, value, 'bool'), ir.agg('min', src, row, value, value.t)]], alt);
@@ -225,9 +239,16 @@ function rankX(c, args, env) {
   const desc = isDesc(args[3], true);
   const dense = args[4] && args[4].k === 'name' && args[4].name.toUpperCase() === 'DENSE';
   const ahead = ir.op(desc ? 'gt' : 'lt', arg, value);
-  const n = dense ? ir.agg('dcount0', src, row, ir.kase([[ahead, arg]], ir.BLANK, arg.t), 'int')
-    : ir.agg('count0', src, row, ir.kase([[ahead, ir.lit(1)]], ir.BLANK, 'int'), 'int');
-  return ir.op('add', n, ir.lit(1));
+  if (!dense) return ir.op('add', ir.agg('count0', src, row, ir.kase([[ahead, ir.lit(1)]], ir.BLANK, 'int'), 'int'), ir.lit(1));
+  // DENSE: the distinct values ahead. RANKX compares a blank as its type's default (0, ""),
+  // so a blank and the default are one value: the other values ahead counted apart, and one
+  // more when a blank or the default is ahead (ascending, it is ahead of every positive
+  // value), though a distinct count of SQL would leave the blank out.
+  const isDefault = ir.op('eq', arg, ir.BLANK);
+  const distinct = ir.agg('dcount0', src, row, ir.kase([[ir.op('and', ahead, ir.op('not', isDefault)), arg]], ir.BLANK, arg.t), 'int');
+  const defaultAhead = ir.agg('count0', src, row, ir.kase([[ir.op('and', ahead, isDefault), ir.lit(1)]], ir.BLANK, 'int'), 'int');
+  const blank = ir.kase([[ir.op('gt', defaultAhead, ir.lit(0)), ir.lit(1)]], ir.lit(0), 'int');
+  return ir.op('add', ir.op('add', distinct, blank), ir.lit(1));
 }
 
 function contains(c, args, env) {
@@ -280,7 +301,7 @@ export const scalar = {
   'PERCENTILEX.INC': percentile('pct_inc', true), 'PERCENTILEX.EXC': percentile('pct_exc', true),
   COUNTROWS: countRows, CONCATENATEX: concatenateX, RANKX: rankX,
   CALCULATE: calculate,
-  ISFILTERED: isFiltered, ISCROSSFILTERED: isCrossFiltered, ISINSCOPE: isInScope,
+  ISFILTERED: isFiltered, ISCROSSFILTERED: isCrossFiltered, ISINSCOPE: isInScope, ISSUBTOTAL: isSubtotal,
   HASONEVALUE: hasOneValue, HASONEFILTER: hasOneFilter, SELECTEDVALUE: selectedValue,
   LOOKUPVALUE: lookupValue, RELATED: related, EARLIER: earlier, EARLIEST: earlier,
   CONTAINS: contains, CONTAINSROW: containsRow, ISEMPTY: isEmpty,

@@ -15,13 +15,13 @@
 // ALL and the other modifiers, then the filters, each replacing what the context said about
 // its columns unless it is KEEPFILTERS); a measure is its expression under CALCULATE; an
 // aggregate is a scan of its table under the ctx of where it stands.
-import { parseExpression, parseQuery } from './parser.js?v=aeea5e4';
-import { DaxError, semantic, unsupported } from './errors.js?v=aeea5e4';
-import { Ctx, EMPTY_CTX, narrow } from './context.js?v=aeea5e4';
-import { isDateKey } from './model.js?v=aeea5e4';
-import * as ir from './ir.js?v=aeea5e4';
-import { dateLit, rowsTable } from './ir.js?v=aeea5e4';
-import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=aeea5e4';
+import { parseExpression, parseQuery } from './parser.js?v=c5d087d';
+import { DaxError, semantic, unsupported } from './errors.js?v=c5d087d';
+import { Ctx, EMPTY_CTX, narrow } from './context.js?v=c5d087d';
+import { isDateKey } from './model.js?v=c5d087d';
+import * as ir from './ir.js?v=c5d087d';
+import { dateLit, rowsTable } from './ir.js?v=c5d087d';
+import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=c5d087d';
 
 const lc = s => String(s).toLowerCase();
 
@@ -31,20 +31,43 @@ export class Compiler {
     this.options = options;
   }
 
-  // A DAX query -> [{ table, order, define }] one per EVALUATE.
-  query(src) {
+  // A DAX query -> [{ table, order, define }] one per EVALUATE, handed to `then` (which writes
+  // the SQL) while the query's DEFINE COLUMNs are columns of their tables.
+  query(src, then = statements => statements) {
     const q = parseQuery(src);
     const model = this.model.fork(), c = new Compiler(model, this.options);
-    const queryVars = new Map(), queryTables = new Map();
+    const queryVars = new Map(), queryTables = new Map(), queryCols = [];
     const env0 = c.env({ vars: queryVars, queryTables, queryVarsTop: queryVars });
-    for (const d of q.defines) {
-      if (d.kind === 'measure') {
-        const table = model.table(d.table);
-        model.measures.set(lc(d.name), { name: d.name, table, text: null, ast: d.e, query: true });
-      } else if (d.kind === 'var') queryVars.set(lc(d.name), { ast: d.e, env: { ...env0, vars: new Map(queryVars) } });
-      else if (d.kind === 'table') queryTables.set(lc(d.name), { ast: d.e, env: { ...env0, vars: new Map(queryVars) } });
-      else throw unsupported(`DEFINE ${d.kind.toUpperCase()}`);
+    try {
+      for (const d of q.defines) {
+        if (d.kind === 'measure') {
+          const table = model.table(d.table);
+          model.measures.set(lc(d.name), { name: d.name, table, text: null, ast: d.e, query: true });
+        } else if (d.kind === 'var') queryVars.set(lc(d.name), { ast: d.e, env: { ...env0, vars: new Map(queryVars) } });
+        else if (d.kind === 'table') queryTables.set(lc(d.name), { ast: d.e, env: { ...env0, vars: new Map(queryVars) } });
+        else if (d.kind === 'column') queryCols.push([model.addQueryColumn(model.table(d.table), d.name), d]);
+        else throw unsupported(`DEFINE ${d.kind.toUpperCase()}`);
+      }
+      // A column defined in the query is a calculated column: its expression on a row of its
+      // table, in an empty filter context (and, as it is written, without row-level security).
+      for (const [col, d] of queryCols) {
+        const row = ir.newRow(col.table.columns.map(x => ({ name: x.name, lineage: x, t: x.type })), 'scan', { base: col.table });
+        let expr;
+        try { expr = c.scalar(d.e, { ...env0, rows: [row] }); } catch (e) {
+          if (e instanceof DaxError) e.message = `column '${col.table.name}'[${col.name}]: ${e.message}`;
+          throw e;
+        }
+        Object.assign(col.query, { row, expr });
+        col.type = expr.t ?? 'variant';
+      }
+      return then(c.evaluates(q, env0));
+    } finally {
+      model.dropQueryColumns(queryCols.map(([col]) => col));
     }
+  }
+
+  evaluates(q, env0) {
+    const c = this;
     return q.evaluates.map(ev => {
       const table = c.table(ev.e, env0);
       const row = ir.rowOf(table, 'table');
@@ -175,11 +198,14 @@ export class Compiler {
       if (sel.items.length === 1) return item(sel.items[0]);
       return g.multipleOrEmpty ? special(g.multipleOrEmpty, `${g.table.name}:multiple`) : null;
     }
-    const src = this.scan(g.table, env.ctx), row = ir.rowOf(src), value = ir.col(row, g.column);
+    // The name selected: the group's column under the filters that select (itemFilters), not
+    // under an ordinal filter the name filter left in the context.
+    const own = itemFilters(g, env.ctx), others = groupFilters(g, env.ctx).filter(f => !own.includes(f));
+    const sctx = others.length ? new Ctx(env.ctx.filters.filter(f => !others.includes(f)), env.ctx.mods) : env.ctx;
+    const src = this.scan(g.table, sctx), row = ir.rowOf(src), value = ir.col(row, g.column);
     const name = ir.kase([[ir.agg('hasone', src, row, value, 'bool'), ir.agg('min', src, row, value, 'string')]], ir.BLANK, 'string');
     // In the branch of an item, the selection is that item while the filters on the group
     // stay the same ones.
-    const own = groupFilters(g, env.ctx);
     const w = sel.items.map(it => {
       const known = new Map(env.cgKnown ?? []).set(g, { item: it, filters: own });
       return [ir.op('eqs', name, ir.lit(it.name, 'string')), this.withKnown(env, known, () => item(it))];
@@ -205,15 +231,20 @@ export class Compiler {
 
   // What the filter context selects of a calculation group: { kind: 'none' } when nothing
   // filters it, else { items, dynamic }: the items the filters known at compile time allow,
-  // and whether some filter is only known at run time.
-  selection(g, env) {
-    const filters = groupFilters(g, env.ctx);
+  // and whether some filter is only known at run time. The item applied is the one the
+  // filters on the group's name select (itemFilters); with `rows`, the items are instead the
+  // rows the group's table holds under all its filters (VALUES of its column).
+  selection(g, env, rows = false) {
+    const own = itemFilters(g, env.ctx);
+    const filters = rows ? groupFilters(g, env.ctx) : own;
     if (!filters.length) return { kind: 'none' };
+    let items = g.items, dynamic = false, rest = filters;
     const known = this._known?.get(g);
-    if (known && known.filters.length === filters.length && known.filters.every((f, i) => f === filters[i]))
-      return { kind: 'items', items: [known.item], dynamic: false };
-    let items = g.items, dynamic = false;
-    for (const f of filters) {
+    if (known && known.filters.length === own.length && known.filters.every((f, i) => f === own[i])) {
+      items = [known.item];
+      rest = filters.filter(f => !own.includes(f));
+    }
+    for (const f of rest) {
       const r = this.filterItems(g, f, items);
       items = r.items;
       if (r.dynamic) dynamic = true;
@@ -270,7 +301,7 @@ export class Compiler {
     const value = itemValue(g);
     const sctx = valuesCtx(src);
     if (sctx && src.cols[i]?.lineage === col) {
-      const sel = this.selection(g, { ctx: sctx });
+      const sel = this.selection(g, { ctx: sctx }, true);
       return sel.kind === 'none' ? { items: g.items, exact: true } : { items: sel.items, exact: !sel.dynamic };
     }
     switch (src.k) {
@@ -332,7 +363,7 @@ export class Compiler {
   // iterates (those with a lineage): their values as iterated, what ALLSELECTED restores.
   iter(env, row) {
     const cols = new Set(row.cols.map(c => c.lineage).filter(Boolean));
-    const shadows = cols.size && row.src ? [...env.shadows, { cols, src: row.src, ctx: env.ctx }] : env.shadows;
+    const shadows = cols.size && row.src ? [...env.shadows, { cols, src: row.src, ctx: env.ctx, row }] : env.shadows;
     return { ...env, rows: [...env.rows, row], shadows };
   }
 
@@ -361,11 +392,13 @@ export class Compiler {
       for (const c of cols) if (!key || c !== t.key) ctx = ctx.add({ kind: 'bind', cols: [c], val: ir.col(row, c), implied: key });
       return ctx;
     }
+    // Each column's value replaces the filters on it; a date table's date, like a filter
+    // argument on it, replaces the filters on the rest of that table too.
     row.open = false;
-    row.cols.forEach((c, i) => {
-      if (!c.lineage) return;
-      ctx = ctx.remove(x => x === c.lineage).add({ kind: 'bind', cols: [c.lineage], val: ir.col(row, row.kind === 'virtual' ? c.lineage : i) });
-    });
+    const cols = new Map(row.cols.map((c, i) => [c.lineage, i]).filter(([l]) => l));
+    const dates = new Set([...cols.keys()].filter(l => isDateKey(this.model, l)).map(l => l.table));
+    ctx = ctx.remove(x => cols.has(x) || dates.has(x.table));
+    for (const [l, i] of cols) ctx = ctx.add({ kind: 'bind', cols: [l], val: ir.col(row, row.kind === 'virtual' ? l : i) });
     return ctx;
   }
 
@@ -524,9 +557,10 @@ export class Compiler {
   // --- CALCULATE -------------------------------------------------------------------------
 
   // The filter context CALCULATE(_, args) evaluates its expression in.
-  calculateCtx(args, env) {
+  // `nonvisual`: the arguments are SUMMARIZECOLUMNS', where NONVISUAL can mark a filter.
+  calculateCtx(args, env, nonvisual = false) {
     // 1. The filter arguments, in the context outside.
-    const actions = args.filter(a => a.k !== 'empty').flatMap(a => this.filterArg(a, env, false));
+    const actions = args.filter(a => a.k !== 'empty').flatMap(a => this.filterArg(a, env, false, nonvisual));
     // 2. Context transition.
     let ctx = this.transition(env);
     // 3. The modifiers: relationships first, then what is removed.
@@ -542,7 +576,9 @@ export class Compiler {
       if (keep) continue;
       for (const c of f.cols) {
         replaced.add(c);
-        // A filter on a date table's date removes the filters on the rest of that table.
+        // A filter on a date table's date removes the filters on the rest of that table. One
+        // on a calculation group's name does not remove the one on its ordinal: grouped by
+        // both, the row's ordinal stays, and the item applied follows the name (selection).
         if (isDateKey(this.model, c)) for (const x of c.table.columns) replaced.add(x);
       }
     }
@@ -553,9 +589,19 @@ export class Compiler {
 
   // One filter argument -> actions: { kind:'filter', filter, keep } | { kind:'remove', drop } |
   // { kind:'mods', change } | { kind:'selected', cols }.
-  filterArg(ast, env, keep) {
+  filterArg(ast, env, keep, nonvisual = false) {
     if (ast.k === 'call') {
       if (ast.fn === 'KEEPFILTERS') return this.filterArg(ast.args[0], env, true);
+      // NONVISUAL(filter) in SUMMARIZECOLUMNS: a filter like the others, marked so that the
+      // shadow filter context of its groups (what ALLSELECTED puts back) leaves it out.
+      if (ast.fn === 'NONVISUAL') {
+        if (!nonvisual) throw semantic('NONVISUAL can only mark a filter of SUMMARIZECOLUMNS');
+        if (ast.args.length !== 1) throw semantic('NONVISUAL(filter)');
+        return this.filterArg(ast.args[0], env, keep).map(a => {
+          if (a.kind !== 'filter') throw semantic('NONVISUAL takes a filter, not a modifier');
+          return { ...a, filter: { ...a.filter, nonvisual: true } };
+        });
+      }
       const m = MODIFIERS.get(ast.fn);
       if (m) return [m(this, ast.args, env)];
     }
@@ -621,6 +667,10 @@ export class Compiler {
       } else if (clear) drop.add(c);
     }
     if (drop.size) ctx = ctx.remove(c => drop.has(c));
+    // A SUMMARIZE group's rows (`group`, the filter its context transition adds besides its
+    // values) go with the iteration whose shadow is put back.
+    const back = new Set([...by.keys()].map(s => s.row).filter(Boolean));
+    if (ctx.filters.some(f => back.has(f.group))) ctx = new Ctx(ctx.filters.filter(f => !back.has(f.group)), ctx.mods);
     for (const [s, on] of by) ctx = this.shadowFilter(ctx, s, on);
     return ctx;
   }
@@ -686,7 +736,7 @@ function valuesCtx(x) {
 const OPAQUE = new Set(['CALCULATE', 'CALCULATETABLE', 'FILTER', 'SUMX', 'AVERAGEX', 'MINX', 'MAXX', 'COUNTX', 'COUNTAX',
   'CONCATENATEX', 'PRODUCTX', 'MEDIANX', 'RANKX', 'SUM', 'AVERAGE', 'MIN', 'MAX', 'COUNT', 'COUNTA', 'COUNTROWS',
   'DISTINCTCOUNT', 'DISTINCTCOUNTNOBLANK', 'COUNTBLANK', 'VALUES', 'DISTINCT', 'ALL', 'SELECTEDVALUE', 'HASONEVALUE',
-  'ISFILTERED', 'ISCROSSFILTERED', 'ISINSCOPE', 'LOOKUPVALUE', 'RELATED', 'EARLIER', 'EARLIEST', 'TOPN', 'MEDIAN',
+  'ISFILTERED', 'ISCROSSFILTERED', 'ISINSCOPE', 'ISSUBTOTAL', 'LOOKUPVALUE', 'RELATED', 'EARLIER', 'EARLIEST', 'TOPN', 'MEDIAN',
   'PRODUCT', 'STDEV.S', 'STDEV.P', 'VAR.S', 'VAR.P', 'STDEVX.S', 'STDEVX.P', 'VARX.S', 'VARX.P', 'PERCENTILE.INC',
   'PERCENTILE.EXC', 'PERCENTILEX.INC', 'PERCENTILEX.EXC', 'FIRSTNONBLANK', 'LASTNONBLANK', 'CONTAINS', 'ISEMPTY']);
 function collectColumns(ast, model, out) {
@@ -709,6 +759,14 @@ const colOf = x => (typeof x.ref === 'number' ? x.row.cols[x.ref].lineage ?? x.r
 const colIndex = x => (typeof x.ref === 'number' ? x.ref : x.row.cols.findIndex(c => c.lineage === x.ref));
 // The filters on a calculation group's columns.
 const groupFilters = (g, ctx) => ctx.filters.filter(f => f.cols.some(c => c.table === g.table));
+// The filters that select a calculation group's item: those on its name column; with none,
+// those on its other columns (the ordinal stands for an item too). A filter on the name
+// does not meet one on the ordinal: name "PY" with the ordinal of another item still
+// applies PY, though no row of the group's table has both.
+const itemFilters = (g, ctx) => {
+  const all = groupFilters(g, ctx), named = all.filter(f => f.cols.includes(g.column));
+  return named.length ? named : all;
+};
 // DAX's =: text without regard to case.
 const sameValue = (a, b) => (typeof a === 'string' && typeof b === 'string' ? a.toLowerCase() === b.toLowerCase() : a === b);
 

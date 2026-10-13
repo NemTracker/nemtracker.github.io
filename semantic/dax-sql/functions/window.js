@@ -7,9 +7,9 @@
 // the column to (a group key, a context transition). A column with no outer value takes each
 // of its values in the filter context, and the result is the union over them. With no
 // relation, it is ALLSELECTED of the ORDERBY and PARTITIONBY columns.
-import * as ir from '../ir.js?v=aeea5e4';
-import { semantic, unsupported } from '../errors.js?v=aeea5e4';
-import { isDesc } from './aggregate.js?v=aeea5e4';
+import * as ir from '../ir.js?v=c5d087d';
+import { semantic, unsupported } from '../errors.js?v=c5d087d';
+import { isDesc } from './aggregate.js?v=c5d087d';
 
 const lc = s => String(s).toLowerCase();
 const word = (a, set) => a?.k === 'name' && set.includes(a.name.toUpperCase());
@@ -68,12 +68,14 @@ function windowArgs(c, args, env, fn) {
     return i;
   };
   // PARTITIONBY: columns of the relation, or of a table related to it (read with RELATED).
+  // Not a column a table function added (one with no lineage): DAX rejects it.
   const partExprs = [], parts = [];
   for (const a of part) {
     let i = -1;
     try { i = index(a, 'PARTITIONBY'); } catch (e) {
       if (!(a.k === 'col' && a.table && rel.base && c.model.findColumn(a.table, a.name))) throw e;
     }
+    if (i >= 0 && !rel.cols[i].lineage) throw semantic(`PARTITIONBY cannot be used with columns added by table functions ([${rel.cols[i].name}])`);
     if (i >= 0) { parts.push(i); partExprs.push(ir.col(row, i)); } else partExprs.push(c.scalar({ k: 'call', fn: 'RELATED', args: [a] }, inner));
   }
   const related = partExprs.length > parts.length;
@@ -91,7 +93,14 @@ function currentRow(c, env, rel, idx) {
   const match = [], loose = [];
   for (const i of idx) {
     const l = rel.cols[i].lineage;
-    if (!l) continue;   // a column a table function added has no outer value
+    // A column a table function added has no lineage: its outer value is the row context's
+    // column of that name (the relation iterated by an outer ADDCOLUMNS, say); with none,
+    // it does not say which row is the current one.
+    if (!l) {
+      const byName = c.rowColumn(env, null, rel.cols[i].name);
+      if (byName) match.push({ i, val: byName });
+      continue;
+    }
     const fromRow = c.rowColumn(env, l.table.name, l.name);
     if (fromRow) { match.push({ i, val: fromRow }); continue; }
     const b = env.ctx.filters.find(f => f.kind === 'bind' && f.cols[0] === l);
@@ -106,7 +115,8 @@ function currentRow(c, env, rel, idx) {
       if (!byTable.has(l.table)) byTable.set(l.table, []);
       byTable.get(l.table).push(i);
     }
-    const parts = [...byTable].map(([t, is]) => ir.values(t, env.ctx, is.map(i => rel.cols[i].lineage), (tb, x) => c.scan(tb, x)));
+    // Their values as VALUES has them: the table's blank row is one, when it has one.
+    const parts = [...byTable].map(([t, is]) => ir.values(t, env.ctx, is.map(i => rel.cols[i].lineage), (tb, x) => c.scan(tb, x), c.blankRowRels(t).length > 0));
     const order = [...byTable.values()].flat();
     const table = parts.length === 1 ? parts[0] : { k: 'cross', srcs: parts, cols: parts.flatMap(p => p.cols), base: null };
     unbound = { table, idx: order };

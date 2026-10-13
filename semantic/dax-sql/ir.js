@@ -25,14 +25,19 @@
 //   rows     { rows: [[scalar]] }    a table constructor, ROW, DATATABLE
 //   series   { start, end, step }
 //   topn     { src, row, n, order: [{ expr, desc }] }
+//   topnskip { src, row, n, skip, order: [{ expr, desc, t }] }
+//   join     { left, right, on: [[i, j]], rest: [j], outer }   NATURALINNERJOIN and its kind
+//   subindex { src, idx, row, on: [[i, j]], rest: [i], order }  SUBSTITUTEWITHINDEX
 //   generate { left, lrow, right, outer }
 //   sc       SUMMARIZECOLUMNS (see compiler.js)
 //   shared   { src }                 a table VAR: written once when nothing outside it varies
 //   onerow   { vals, cond }          one row of values when cond holds (VALUES of a column the
 //                                    context binds to one value), else none
 //   prefix   { vals, cond, src }     the rows of src after those values, when cond holds
+//   paths    { key, parent }         a row per row of a parent-child table, over all its rows:
+//                                    its key and PATH(key, parent)
 
-import { semantic } from './errors.js?v=aeea5e4';
+import { semantic } from './errors.js?v=c5d087d';
 
 let nextId = 1;
 export const newRow = (cols, kind = 'table', extra = {}) => ({ id: nextId++, cols, kind, ...extra });
@@ -81,19 +86,33 @@ export function op(o, ...a) {
   }
   if (o === 'not' && l.k === 'lit' && typeof l.v === 'boolean') return lit(!l.v);
   if (o === 'neg' && l.k === 'lit' && typeof l.v === 'number') return lit(-l.v, l.t);
+  const fx = r && fixed(o, l.t, r.t);
   let t;
-  if (['eq', 'eqs', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'in'].includes(o)) t = 'bool';
+  if (fx) t = o === 'add' || o === 'sub' ? 'decimal' : 'double';
+  else if (['eq', 'eqs', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'in'].includes(o)) t = 'bool';
   else if (o === 'concat') t = 'string';
   else if (o === 'div' || o === 'pow') t = 'double';
   else if (o === 'neg') t = l.t;
   else if ((o === 'add' || o === 'sub') && (l.t === 'datetime' || l.t === 'date')) t = isNum(r.t) ? l.t : o === 'add' ? 'datetime' : 'double';
   else if (o === 'add' && isNum(l.t) && (r.t === 'datetime' || r.t === 'date')) t = 'datetime';
-  else t = l.t === 'int' && r.t === 'int' ? 'int' : l.t === 'decimal' && r.t === 'decimal' && o !== 'mul' ? 'decimal' : 'double';
+  else t = l.t === 'int' && r.t === 'int' ? 'int' : 'double';
   // Comparisons and logic never give a blank; + and - give one only when both sides do.
   const nn = t === 'bool' || o === 'concat' || (o === 'add' || o === 'sub') && (l.nn || r.nn)
     || (o === 'mul' || o === 'neg') && a.every(x => x.nn);
-  return { k: 'op', op: o, a, t, nn };
+  const x = { k: 'op', op: o, a, t, nn };
+  return fx && t !== 'decimal' ? currency(x) : x;
 }
+// A fixed decimal (currency) with a number, as DAX types it: + and - with a whole number or
+// another fixed decimal are one; * by a whole or decimal number (either side), and / by one,
+// are one too, rounded to its four places (half away from zero). Two of them multiplied or
+// divided, and one with a decimal number added, give a decimal number.
+const fixed = (o, a, b) => {
+  const n = t => t === 'int' || t === 'double';
+  if (o === 'add' || o === 'sub') return (a === 'decimal' || b === 'decimal') && [a, b].every(t => t === 'decimal' || t === 'int');
+  if (o === 'mul') return (a === 'decimal' && n(b)) || (n(a) && b === 'decimal');
+  return o === 'div' && a === 'decimal' && n(b);
+};
+export const currency = x => fn('round', [x, lit(4)], 'decimal', { strict: true });
 const boolOf = x => x.t === 'bool' && x.nn ? x : { k: 'op', op: 'bool', a: [x], t: 'bool', nn: true };
 
 // `strict`: the function gives a blank when its first argument is blank (and on a constant
@@ -109,7 +128,8 @@ export function kase(w, e, t) {
   if (!w.length) return e;
   const all = [...w.map(x => x[1]), e];
   t ??= unify(all.map(x => x.t));
-  return { k: 'case', w, e, t, nn: all.every(x => x.nn) };
+  const x = { k: 'case', w, e, t, nn: all.every(x => x.nn) };
+  return all.some(v => v.dax) ? { ...x, dax: unify(all.map(v => v.dax ?? v.t)) } : x;
 }
 export const agg = (f, src, row, arg, t, a = []) => ({ k: 'agg', fn: f, src, row, arg, a, t, nn: false });
 export const exists = src => ({ k: 'exists', src, t: 'bool', nn: true });
@@ -124,7 +144,8 @@ export const scan = (table, ctx) => ({ k: 'scan', table, ctx, base: table,
 export const filter = (src, row, pred) => isLit(pred, true) ? src : ({ k: 'filter', src, row, pred, cols: src.cols, base: src.base });
 
 export function project(src, row, items, keep = false) {
-  const cols = [...(keep ? src.cols : []), ...items.map(i => ({ name: i.name, lineage: i.lineage ?? null, t: i.t ?? i.expr.t }))];
+  const cols = [...(keep ? src.cols : []), ...items.map(i => ({ name: i.name, lineage: i.lineage ?? null, t: i.t ?? i.expr.t,
+    ...(i.expr?.dax ? { dax: i.expr.dax } : {}) }))];
   return { k: 'project', src, row, items, keep, cols, base: keep ? src.base : null };
 }
 // Distinct rows of a model table are still rows of it.
@@ -140,26 +161,29 @@ export const itemOf = (row, ref, name) => {
 // Where the context binds the one column to a value (a group key, a context transition),
 // that is the value, when a row holds it: a table of one row, with no scan to group.
 // With `blank` (VALUES and ALL, not DISTINCT and ALLNOBLANKROW), the table's blank row is one
-// of them when it has one.
-export function values(table, ctx, columns, scanOf, blank = false) {
+// of them when it has one. `unmatched`: as withBlank's.
+export function values(table, ctx, columns, scanOf, blank = false, unmatched = true) {
   const src = scanOf(table, ctx);
   if (columns.length === 1) {
     const b = ctx.filters.find(f => f.kind === 'bind' && f.cols[0] === columns[0]);
     if (b) {
       let cond = exists(src);
-      if (blank) cond = op('or', cond, op('and', fn('isblank', [b.val], 'bool', { nn: true }), { k: 'blankexists', table, ctx, t: 'bool', nn: true }));
+      if (blank) cond = op('or', cond, op('and', fn('isblank', [b.val], 'bool', { nn: true }), { k: 'blankexists', table, ctx, unmatched, t: 'bool', nn: true }));
       return oneRow([b.val], cond, [columns[0]]);
     }
   }
   const row = rowOf(src);
   const out = distinct(project(src, row, columns.map(c => itemOf(row, c))));
-  return blank ? withBlank(out, table, ctx) : out;
+  return blank ? withBlank(out, table, ctx, unmatched) : out;
 }
 
 // The rows of `src` (of model table `table`, or values of its columns) and the table's blank
 // row, as the filter context `ctx` leaves it.
 // `lineage`: the columns of the table the blank row is read as (TREATAS may rename `cols`).
-export const withBlank = (src, table, ctx) => ({ k: 'withblank', src, table, ctx, cols: src.cols, base: src.base,
+// `unmatched`: whether a filter that comes back from a many side keeps the blank row when the
+// many side's rows it keeps have keys the table lacks (VALUES lists it; DISTINCTCOUNT, which
+// counts the table's rows, does not).
+export const withBlank = (src, table, ctx, unmatched = true) => ({ k: 'withblank', src, table, ctx, unmatched, cols: src.cols, base: src.base,
   lineage: src.cols.map(c => c.lineage) });
 
 // A table of one row, the values `vals` in columns of lineage `lineages`, when `cond` holds;
@@ -171,6 +195,17 @@ export const oneRow = (vals, cond, lineages) => ({ k: 'onerow', vals, cond, base
 // a one-row table and another.
 export const prefix = (vals, cond, lineages, src) => ({ k: 'prefix', vals, cond, src, base: null,
   cols: [...lineages.map(l => ({ name: l.name, lineage: l, t: l.type })), ...src.cols] });
+
+// The paths of a parent-child hierarchy (PATH): columns key and path, one table per pair of
+// columns, so that a query writes them once.
+const _paths = new WeakMap();
+export function paths(key, parent) {
+  let m = _paths.get(key);
+  if (!m) _paths.set(key, m = new Map());
+  if (!m.has(parent)) m.set(parent, { k: 'paths', key, parent, base: null,
+    cols: [{ name: 'key', lineage: null, t: key.type }, { name: 'path', lineage: null, t: 'string' }] });
+  return m.get(parent);
+}
 
 export function dateLit(v) {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(v.trim());
@@ -212,7 +247,11 @@ export function freeRows(x) {
     case 'cross': case 'union': case 'intersect': case 'except': x.srcs.forEach(add); break;
     case 'rows': x.rows.forEach(r => r.forEach(add)); break;
     case 'series': add(x.start); add(x.end); add(x.step); break;
+    case 'paths': break;
     case 'topn': add(x.src); add(x.n); x.order.forEach(o => add(o.expr)); bound.add(x.row.id); break;
+    case 'topnskip': add(x.src); add(x.n); add(x.skip); x.order.forEach(o => add(o.expr)); bound.add(x.row.id); break;
+    case 'join': add(x.left); add(x.right); break;
+    case 'subindex': add(x.src); add(x.idx); x.order.forEach(o => add(o.expr)); bound.add(x.row.id); break;
     case 'generate': add(x.left); add(x.right); bound.add(x.lrow.id); break;
     case 'sc': add(x.ctx0 && { k: 'scan', ctx: x.ctx0 }); x.levels.forEach(l => l.items.forEach(i => add(i.expr))); bound.add(x.keyRow.id); break;
     case 'currentgroup': break;
