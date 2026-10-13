@@ -15,14 +15,14 @@
 // ALL and the other modifiers, then the filters, each replacing what the context said about
 // its columns unless it is KEEPFILTERS); a measure is its expression under CALCULATE; an
 // aggregate is a scan of its table under the ctx of where it stands.
-import { parseExpression, parseQuery } from './parser.js?v=e75bf82';
-import { DaxError, semantic, unsupported } from './errors.js?v=e75bf82';
-import { Ctx, EMPTY_CTX, narrow } from './context.js?v=e75bf82';
-import { isDateKey } from './model.js?v=e75bf82';
-import * as ir from './ir.js?v=e75bf82';
-import { dateLit, rowsTable } from './ir.js?v=e75bf82';
-import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=e75bf82';
-import { visualTable } from './functions/visual.js?v=e75bf82';
+import { parseExpression, parseQuery } from './parser.js?v=e2e0a1e';
+import { DaxError, semantic, unsupported } from './errors.js?v=e2e0a1e';
+import { Ctx, EMPTY_CTX, narrow } from './context.js?v=e2e0a1e';
+import { isDateKey } from './model.js?v=e2e0a1e';
+import * as ir from './ir.js?v=e2e0a1e';
+import { dateLit, rowsTable } from './ir.js?v=e2e0a1e';
+import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=e2e0a1e';
+import { visualTable } from './functions/visual.js?v=e2e0a1e';
 
 const lc = s => String(s).toLowerCase();
 // A column a table function named Table[Column] (ir.qualifiedName), named so.
@@ -38,10 +38,11 @@ export class Compiler {
     this.options = options;
   }
 
-  // A DAX query -> [{ table, order, define }] one per EVALUATE, handed to `then` (which writes
-  // the SQL) while the query's DEFINE COLUMNs are columns of their tables.
+  // A DAX query (its text, or its tree: a SELECT over the model builds the tree itself) ->
+  // [{ table, order, define }] one per EVALUATE, handed to `then` (which writes the SQL) while
+  // the query's DEFINE COLUMNs are columns of their tables.
   query(src, then = statements => statements) {
-    const q = parseQuery(src);
+    const q = typeof src === 'string' ? parseQuery(src) : src;
     const model = this.model.fork(), c = new Compiler(model, this.options);
     const queryVars = new Map(), queryTables = new Map(), queryCols = [];
     const env0 = c.env({ vars: queryVars, queryTables, queryVarsTop: queryVars });
