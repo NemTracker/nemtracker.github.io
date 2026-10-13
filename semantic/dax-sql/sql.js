@@ -20,7 +20,7 @@
 // [bracketed] ones, 'Table'[Column] as in DAX, or a column's name alone when one table has
 // it. AGG(m) and MEASURE(m) are measure m (AGG(Orders), AGG(Sales.Orders)); SUM, AVG,
 // MIN, MAX and COUNT (COUNT(DISTINCT c)) aggregate a column. FROM names the model.
-import { DaxError } from './errors.js?v=91e74aa';
+import { DaxError } from './errors.js?v=8c999ec';
 
 const lc = s => String(s).toLowerCase();
 const sqlSyntax = (msg, pos, src) => new DaxError(`SQL syntax: ${msg}`, { code: 'SYNTAX', pos, src });

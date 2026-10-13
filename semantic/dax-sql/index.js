@@ -1,4 +1,4 @@
-// dax-sql: DAX queries over a Tabular semantic model (TMSL, model.bim) -> SQL.
+// dax-sql: DAX queries over a Tabular semantic model (TMSL, model.bim, or Apache Ossie with DAX metrics) -> SQL.
 //
 //   import { createCompiler } from 'dax-sql';
 //   const dax = createCompiler(bim, { tableSource: t => `v_${t.name}` });
@@ -21,23 +21,24 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=91e74aa';
-import { Compiler } from './compiler.js?v=91e74aa';
-import { Emitter } from './emit.js?v=91e74aa';
-import { parseExpression } from './parser.js?v=91e74aa';
-import { DuckDBDialect } from './dialects/duckdb.js?v=91e74aa';
-import { Dialect } from './dialects/base.js?v=91e74aa';
-import { newRow } from './ir.js?v=91e74aa';
-import { DaxError, semantic } from './errors.js?v=91e74aa';
-import { Ctx } from './context.js?v=91e74aa';
-import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=91e74aa';
+import { Model } from './model.js?v=8c999ec';
+import { Compiler } from './compiler.js?v=8c999ec';
+import { Emitter } from './emit.js?v=8c999ec';
+import { parseExpression } from './parser.js?v=8c999ec';
+import { DuckDBDialect } from './dialects/duckdb.js?v=8c999ec';
+import { Dialect } from './dialects/base.js?v=8c999ec';
+import { newRow } from './ir.js?v=8c999ec';
+import { DaxError, semantic } from './errors.js?v=8c999ec';
+import { Ctx } from './context.js?v=8c999ec';
+import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=8c999ec';
 
-export { DaxError } from './errors.js?v=91e74aa';
-export { Dialect } from './dialects/base.js?v=91e74aa';
-export { DuckDBDialect } from './dialects/duckdb.js?v=91e74aa';
-export { parseQuery, parseExpression } from './parser.js?v=91e74aa';
-export { parseSql, modelRelations } from './sql.js?v=91e74aa';
-export { Model } from './model.js?v=91e74aa';
+export { DaxError } from './errors.js?v=8c999ec';
+export { Dialect } from './dialects/base.js?v=8c999ec';
+export { DuckDBDialect } from './dialects/duckdb.js?v=8c999ec';
+export { parseQuery, parseExpression } from './parser.js?v=8c999ec';
+export { parseSql, modelRelations } from './sql.js?v=8c999ec';
+export { Model } from './model.js?v=8c999ec';
+export { isOssie, fromOssie } from './ossie.js?v=8c999ec';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
