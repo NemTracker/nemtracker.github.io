@@ -21,9 +21,9 @@
 // =============================================================================
 
 import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev65.0/+esm";
-import { periodsForRange, attachCached } from "./history.js?v=e2e0a1e";
-import { withViews } from "./views.js?v=e2e0a1e";
-import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=e2e0a1e";
+import { periodsForRange, attachCached } from "./history.js?v=c1c610e";
+import { withViews } from "./views.js?v=c1c610e";
+import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=c1c610e";
 
 export function createDataSource({ onStatus = () => {} } = {}) {
   let conn;

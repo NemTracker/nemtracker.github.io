@@ -750,14 +750,14 @@
   </div>
 
   <script type="module">
-    import { createDataSource } from "./storage/data.js?v=e2e0a1e";
-    import { renderLogs } from "./frontend/logs.js?v=e2e0a1e";
-    import { renderModel } from "./frontend/model.js?v=e2e0a1e";
-    import { createQueries, connect } from "./frontend/queries.js?v=e2e0a1e";
+    import { createDataSource } from "./storage/data.js?v=c1c610e";
+    import { renderLogs } from "./frontend/logs.js?v=c1c610e";
+    import { renderModel } from "./frontend/model.js?v=c1c610e";
+    import { createQueries, connect } from "./frontend/queries.js?v=c1c610e";
     import { largestBy, smallestBy, orderBy, cycle, pick, hashIndex, clampIndex, axisClip, percentiles, daysApart, dayCount,
       shiftDate, formatTime, dayAhead, playStep, playDelay, renderCost, round1, round2, kLabel, mwhAxis, fmtGwh, fmtMwh,
       fmtTonnes, fmtMwAbs, pinSide, easeTo, progress, tipPlace, legendColumns, calendarLayout, bandSeries, barPercent,
-      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=e2e0a1e";
+      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=c1c610e";
 
     // =========================================================================
     // 1. QUERIES: what each chart asks the model is frontend/queries.js (createQueries,
@@ -2891,9 +2891,10 @@
     // --- Analyze: SQL, and only SQL ---
     // A SELECT ... FROM model asks the semantic model: its columns and measures, so a figure
     // is the model's measure, as the charts compute it (data.analyze compiles it as the page's
-    // queries are). Any other SQL runs as written over the data's views (a table's view
-    // v_<table>): what the files store, as they store it. The page writes no SQL here; the
-    // example is a query over the model.
+    // queries are). It is the whole text, or a relation in parentheses of any other SQL (a
+    // WITH's query, a subquery, an arm of a UNION), which runs as written over the data's views
+    // (a table's view v_<table>): what the files store, as they store it. The page writes no
+    // SQL here; the example is a query over the model.
     function syncAnalyzeSql() {
       const ta = document.getElementById('analyzeSql');
       if (!ta) return;

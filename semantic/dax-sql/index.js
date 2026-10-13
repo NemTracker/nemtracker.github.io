@@ -21,23 +21,23 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=e2e0a1e';
-import { Compiler } from './compiler.js?v=e2e0a1e';
-import { Emitter } from './emit.js?v=e2e0a1e';
-import { parseExpression } from './parser.js?v=e2e0a1e';
-import { DuckDBDialect } from './dialects/duckdb.js?v=e2e0a1e';
-import { Dialect } from './dialects/base.js?v=e2e0a1e';
-import { newRow } from './ir.js?v=e2e0a1e';
-import { DaxError, semantic } from './errors.js?v=e2e0a1e';
-import { Ctx } from './context.js?v=e2e0a1e';
-import { SqlTranslator, isSql, printDaxQuery } from './sql.js?v=e2e0a1e';
+import { Model } from './model.js?v=c1c610e';
+import { Compiler } from './compiler.js?v=c1c610e';
+import { Emitter } from './emit.js?v=c1c610e';
+import { parseExpression } from './parser.js?v=c1c610e';
+import { DuckDBDialect } from './dialects/duckdb.js?v=c1c610e';
+import { Dialect } from './dialects/base.js?v=c1c610e';
+import { newRow } from './ir.js?v=c1c610e';
+import { DaxError, semantic } from './errors.js?v=c1c610e';
+import { Ctx } from './context.js?v=c1c610e';
+import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=c1c610e';
 
-export { DaxError } from './errors.js?v=e2e0a1e';
-export { Dialect } from './dialects/base.js?v=e2e0a1e';
-export { DuckDBDialect } from './dialects/duckdb.js?v=e2e0a1e';
-export { parseQuery, parseExpression } from './parser.js?v=e2e0a1e';
-export { parseSql } from './sql.js?v=e2e0a1e';
-export { Model } from './model.js?v=e2e0a1e';
+export { DaxError } from './errors.js?v=c1c610e';
+export { Dialect } from './dialects/base.js?v=c1c610e';
+export { DuckDBDialect } from './dialects/duckdb.js?v=c1c610e';
+export { parseQuery, parseExpression } from './parser.js?v=c1c610e';
+export { parseSql, modelRelations } from './sql.js?v=c1c610e';
+export { Model } from './model.js?v=c1c610e';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
@@ -124,10 +124,28 @@ export function createCompiler(bim, options = {}) {
   // A SELECT over the model: the DAX query's tree it builds, compiled as DAX's is (no DAX text
   // between them), with its LIMIT and OFFSET.
   const sqlTranslator = new SqlTranslator(model);
-  function compileSql(text) {
-    const { query, limit, offset } = sqlTranslator.translate(text);
-    const [out] = compileAll(query, `SQL ${text}`);
-    return limit == null && offset == null ? out : { ...out, sql: out.sql + dialect.limit(limit, offset) };
+  function translateSql(text) {
+    const t = sqlTranslator.translate(text);
+    const [out] = compileAll(t.query, `SQL ${text}`);
+    return { ...t, out: t.limit == null && t.offset == null ? out : { ...out, sql: out.sql + dialect.limit(t.limit, t.offset) } };
+  }
+  const compileSql = text => translateSql(text).out;
+  // Any SQL with SELECTs over the model in it: each one's SQL in its place, the rest as written.
+  function compileStatement(text, name = 'model') {
+    if (/^\s*(DEFINE|EVALUATE)\b/i.test(text)) throw new DaxError('SQL: a DAX query is not SQL', { code: 'UNSUPPORTED' });
+    const relation = t => {
+      const { query, out } = translateSql(t);
+      return { text: t, dax: printDaxQuery(query), sql: out.sql };
+    };
+    const { whole, relations } = modelRelations(text, name);
+    if (whole) {
+      const r = relation(text);
+      return { sql: r.sql, relations: [r] };
+    }
+    let sql = text;
+    const out = relations.map(r => ({ ...r, ...relation(r.text) }));
+    for (const r of [...out].reverse()) sql = `${sql.slice(0, r.start)}\n${r.sql}\n${sql.slice(r.end)}`;
+    return { sql, relations: out.map(({ text: t, dax, sql: s }) => ({ text: t, dax, sql: s })) };
   }
   return {
     model,
@@ -140,6 +158,10 @@ export function createCompiler(bim, options = {}) {
       return out[0];
     },
     compileAll,
+    // Any SQL in which a SELECT over the model (FROM `name`, 'model' by default) is a relation in
+    // parentheses -> { sql, relations: [{ text, dax, sql }] }: each SELECT's SQL in its place, the
+    // rest as written. A text that is one SELECT over the model is compiled whole.
+    compileStatement,
     // Whether a text is a DAX query (it starts with DEFINE or EVALUATE).
     isDax: text => /^\s*(DEFINE|EVALUATE)\b/i.test(text),
     // Whether a text is a SELECT over the model, and the DAX query it stands for, with its
