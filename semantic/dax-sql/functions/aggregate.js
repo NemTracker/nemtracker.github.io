@@ -1,7 +1,7 @@
 // Aggregates and iterators, CALCULATE, and the functions that ask about the filter context.
 // An aggregate is { k:'agg' } over a table (a scan of the column's table, for SUM(T[c])).
-import * as ir from '../ir.js?v=c5d087d';
-import { semantic } from '../errors.js?v=c5d087d';
+import * as ir from '../ir.js?v=09facaa';
+import { semantic } from '../errors.js?v=09facaa';
 
 const lc = s => String(s).toLowerCase();
 const numType = t => (t === 'int' || t === 'decimal' ? t : 'double');
@@ -29,12 +29,12 @@ const column = (fn, type) => (c, args, env) => {
   const { src, row, arg } = overColumn(c, args[0], env);
   return ir.agg(fn, src, row, arg, type(arg.t));
 };
-// MINX and MAXX of text are text, but DAX types them as a variant (`dax`: a value's DAX type
-// where it is not its kind of value). It shows where DAX compares types: the natural joins.
+// MINX and MAXX of text are text, but a measure of them is declared a variant (`decl`: the
+// type a measure of the expression has, where it is not the expression's; see measureRef).
 const iterator = (fn, type) => (c, args, env) => {
   const { src, row, arg } = overTable(c, args, env);
   const x = ir.agg(fn, src, row, arg, type(arg.t));
-  return (fn === 'min' || fn === 'max') && arg.t === 'string' ? { ...x, dax: 'variant' } : x;
+  return (fn === 'min' || fn === 'max') && arg.t === 'string' ? { ...x, decl: 'variant' } : x;
 };
 const same = t => t, num = t => numType(t), dbl = () => 'double', int = () => 'int';
 
@@ -106,18 +106,32 @@ export function isDesc(ast, dflt) {
   throw semantic('expected ASC or DESC');
 }
 
+// PERCENTILE.INC/EXC rank a column's values, its blanks left out; PERCENTILEX.INC/EXC rank
+// the expression's value on every row, a blank among them (pctx_). MEDIANX is PERCENTILEX.INC
+// at 0.5, its blanks counted too; MEDIAN leaves a column's blanks out.
 function percentile(fn, x) {
   return (c, args, env) => {
     const o = x ? overTable(c, args, env) : overColumn(c, args[0], env);
     const k = c.scalar(args[x ? 2 : 1], env);
-    return ir.agg(fn, o.src, o.row, o.arg, 'double', [k]);
+    return ir.agg(x ? fn.replace('pct_', 'pctx_') : fn, o.src, o.row, o.arg, 'double', [k]);
   };
 }
+function medianX(c, args, env) {
+  const { src, row, arg } = overTable(c, args, env);
+  return ir.agg('pctx_inc', src, row, arg, 'double', [ir.lit(0.5)]);
+}
+
+// The average of fixed decimals (currency) is one, rounded to four places.
+const average = make => (c, args, env) => {
+  const x = make('avg', dbl)(c, args, env);
+  return x.arg.t === 'decimal' ? ir.currency(x) : x;
+};
 
 // --- the filter context ----------------------------------------------------------------
 
 function calculate(c, args, env) {
   if (!args.length) throw semantic('CALCULATE needs an expression');
+  if (env.boolFilter) throw semantic('a True/False filter of CALCULATE cannot use CALCULATE: it has to be FILTER over a table');
   const ctx = c.calculateCtx(args.slice(1), env);
   // Inside CALCULATE the row contexts are filters now: no row context is left.
   return c.scalar(args[0], { ...env, ctx, rows: [] });
@@ -202,17 +216,24 @@ function lookupValue(c, args, env) {
   return ir.kase([[ir.agg('hasone', src, row, value, 'bool'), ir.agg('min', src, row, value, value.t)]], alt);
 }
 
+// RELATED follows the active relationships, whichever way they filter, but not one CROSSFILTER
+// turns off (None): there is no relationship to follow then.
 function related(c, args, env) {
   const col = c.modelColumn(args[0], env, 'RELATED needs a column');
   const state = c.model.state(env.ctx.mods);
+  const off = new Set(state.filter(s => env.ctx.mods?.cross?.get(s.rel.name) === 'none').map(s => s.rel));
+  const path = from => {
+    const p = c.model.expand(from, state, null, true).get(col.table.name);
+    return p && !p.some(h => off.has(h.rel)) ? p : null;
+  };
   for (let i = env.rows.length - 1; i >= 0; i--) {
     const row = env.rows[i];
-    if (row.base && c.model.expand(row.base, state, null, true).has(col.table.name)) return ir.col(row, col);
+    if (row.base && path(row.base)) return ir.col(row, col);
     // A row of another table that holds the key of a model table: from there.
     for (const rc of row.cols) {
       if (!rc.lineage) continue;
-      const path = c.model.expand(rc.lineage.table, state, null, true).get(col.table.name);
-      if (path?.length && row.cols.some(x => x.lineage === path[0].from)) return ir.col(row, col);
+      const p = path(rc.lineage.table);
+      if (p?.length && row.cols.some(x => x.lineage === p[0].from)) return ir.col(row, col);
     }
   }
   throw semantic(`RELATED('${col.table.name}'[${col.name}]): no row context reaches '${col.table.name}' through a relationship`);
@@ -288,14 +309,14 @@ function nameOf(c, args) {
 export const scalar = {
   SELECTEDMEASURE: selectedMeasure, SELECTEDMEASURENAME: selectedMeasureName,
   SELECTEDMEASUREFORMATSTRING: selectedMeasureFormat, ISSELECTEDMEASURE: isSelectedMeasure, NAMEOF: nameOf,
-  SUM: column('sum', num), AVERAGE: column('avg', dbl), MIN: minMax('min'), MAX: minMax('max'),
+  SUM: column('sum', num), AVERAGE: average(column), MIN: minMax('min'), MAX: minMax('max'),
   COUNT: column('count', int), COUNTA: column('count', int), COUNTBLANK: column('countblank', int),
   DISTINCTCOUNT: distinctCount, DISTINCTCOUNTNOBLANK: column('dcountnb', int),
   PRODUCT: column('product', num), MEDIAN: column('median', dbl),
   'STDEV.S': column('stdev_s', dbl), 'STDEV.P': column('stdev_p', dbl), 'VAR.S': column('var_s', dbl), 'VAR.P': column('var_p', dbl),
-  MINA: minMax('min'), MAXA: minMax('max'), AVERAGEA: column('avg', dbl),
-  SUMX: iterator('sum', num), AVERAGEX: iterator('avg', dbl), MINX: iterator('min', same), MAXX: iterator('max', same),
-  COUNTX: iterator('count', int), COUNTAX: iterator('count', int), PRODUCTX: iterator('product', num), MEDIANX: iterator('median', dbl),
+  MINA: minMax('min'), MAXA: minMax('max'), AVERAGEA: average(column),
+  SUMX: iterator('sum', num), AVERAGEX: average(iterator), MINX: iterator('min', same), MAXX: iterator('max', same),
+  COUNTX: iterator('count', int), COUNTAX: iterator('count', int), PRODUCTX: iterator('product', num), MEDIANX: medianX,
   'STDEVX.S': iterator('stdev_s', dbl), 'STDEVX.P': iterator('stdev_p', dbl), 'VARX.S': iterator('var_s', dbl), 'VARX.P': iterator('var_p', dbl),
   'PERCENTILE.INC': percentile('pct_inc', false), 'PERCENTILE.EXC': percentile('pct_exc', false),
   'PERCENTILEX.INC': percentile('pct_inc', true), 'PERCENTILEX.EXC': percentile('pct_exc', true),

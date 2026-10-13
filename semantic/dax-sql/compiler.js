@@ -15,15 +15,22 @@
 // ALL and the other modifiers, then the filters, each replacing what the context said about
 // its columns unless it is KEEPFILTERS); a measure is its expression under CALCULATE; an
 // aggregate is a scan of its table under the ctx of where it stands.
-import { parseExpression, parseQuery } from './parser.js?v=c5d087d';
-import { DaxError, semantic, unsupported } from './errors.js?v=c5d087d';
-import { Ctx, EMPTY_CTX, narrow } from './context.js?v=c5d087d';
-import { isDateKey } from './model.js?v=c5d087d';
-import * as ir from './ir.js?v=c5d087d';
-import { dateLit, rowsTable } from './ir.js?v=c5d087d';
-import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=c5d087d';
+import { parseExpression, parseQuery } from './parser.js?v=09facaa';
+import { DaxError, semantic, unsupported } from './errors.js?v=09facaa';
+import { Ctx, EMPTY_CTX, narrow } from './context.js?v=09facaa';
+import { isDateKey } from './model.js?v=09facaa';
+import * as ir from './ir.js?v=09facaa';
+import { dateLit, rowsTable } from './ir.js?v=09facaa';
+import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=09facaa';
+import { visualTable } from './functions/visual.js?v=09facaa';
 
 const lc = s => String(s).toLowerCase();
+// A column a table function named Table[Column] (ir.qualifiedName), named so.
+const isNamed = (colName, table, name) => {
+  const q = ir.qualifiedName(colName);
+  return !!q && lc(q.table) === lc(table) && lc(q.name) === lc(name);
+};
+
 
 export class Compiler {
   constructor(model, options = {}) {
@@ -38,8 +45,13 @@ export class Compiler {
     const model = this.model.fork(), c = new Compiler(model, this.options);
     const queryVars = new Map(), queryTables = new Map(), queryCols = [];
     const env0 = c.env({ vars: queryVars, queryTables, queryVarsTop: queryVars });
+    // A table WITH VISUAL SHAPE and the COLUMNs defined on it are a visual calculation's.
+    const visuals = new Map(q.defines.filter(d => d.kind === 'table' && d.shape).map(d => [lc(d.name), []]));
+    for (const d of q.defines) if (d.kind === 'column' && visuals.has(lc(d.table))) visuals.get(lc(d.table)).push(d);
     try {
-      for (const d of q.defines) {
+      for (let d of q.defines) {
+        if (d.kind === 'column' && visuals.has(lc(d.table))) continue;
+        if (d.kind === 'table' && d.shape) d = { ...d, e: { k: 'visualtable', input: d.e, shape: d.shape, columns: visuals.get(lc(d.name)), pos: d.pos } };
         if (d.kind === 'measure') {
           const table = model.table(d.table);
           model.measures.set(lc(d.name), { name: d.name, table, text: null, ast: d.e, query: true });
@@ -49,7 +61,8 @@ export class Compiler {
         else throw unsupported(`DEFINE ${d.kind.toUpperCase()}`);
       }
       // A column defined in the query is a calculated column: its expression on a row of its
-      // table, in an empty filter context (and, as it is written, without row-level security).
+      // table, in an empty filter context. Unlike the model's, it is computed with the query,
+      // so under its row-level security (emit.js).
       for (const [col, d] of queryCols) {
         const row = ir.newRow(col.table.columns.map(x => ({ name: x.name, lineage: x, t: x.type })), 'scan', { base: col.table });
         let expr;
@@ -102,7 +115,7 @@ export class Compiler {
         if (v) return this.isTable(v.ast, v.env);
         return env.queryTables.has(lc(ast.name)) || this.model.hasTable(ast.name);
       }
-      case 'table': return true;
+      case 'table': case 'visualtable': return true;
       case 'var': return this.isTable(ast.body, env);
       default: return false;
     }
@@ -124,7 +137,7 @@ export class Compiler {
         return ir.col(row, c);
       }
       const idx = row.cols.findIndex(x => table
-        ? x.lineage && lc(x.lineage.table.name) === lc(table) && lc(x.lineage.name) === lc(name)
+        ? x.lineage && lc(x.lineage.table.name) === lc(table) && lc(x.lineage.name) === lc(name) || isNamed(x.name, table, name)
         : lc(x.name) === lc(name));
       if (idx >= 0) return (row.kind === 'scan' || row.kind === 'virtual') && row.cols[idx].lineage ? ir.col(row, row.cols[idx].lineage) : ir.col(row, idx);
     }
@@ -133,12 +146,22 @@ export class Compiler {
 
   // [Name]: a column of the row (a renamed or added one first), else a measure.
   ref(ast, env) {
+    const x = this.refOf(ast, env);
+    // A True/False filter of CALCULATE is a predicate on model columns of one table: it cannot
+    // read a column of an outer row context by its name (an iterator's [Value]).
+    const b = env.boolFilter;
+    if (b && x.k === 'col' && x.row !== b && env.rows.indexOf(x.row) < env.rows.indexOf(b))
+      throw semantic(`column [${ast.name}] cannot be used in a True/False filter of CALCULATE, which names model columns only`);
+    return x;
+  }
+  // What [Name] or Table[Name] stands for here.
+  refOf(ast, env) {
     const { table, name } = ast;
     if (table) {
       const t = env.vars.get(lc(table)) || env.queryTables.get(lc(table));
       const m = this.model.measure(name);
       if (!t && m && !this.model.findColumn(table, name)) return this.measureRef(m, env);
-      const c = this.rowColumn(env, t ? null : table, name);
+      const c = this.rowColumn(env, t ? null : table, name) ?? (t ? this.rowColumn(env, table, name) : null);
       if (c) return c;
       if (!t && !this.model.findColumn(table, name)) throw semantic(`the model has no column or measure '${table}'[${name}]`);
       throw semantic(`a single value for column '${table}'[${name}] cannot be determined here: there is no row context on '${table}'`);
@@ -156,11 +179,14 @@ export class Compiler {
   }
 
   // [Measure]: its expression under CALCULATE, through the calculation groups the filter
-  // context selects an item of.
+  // context selects an item of. Its DAX type is the measure's declared one (`decl`), which
+  // can be wider than the expression's written inline: a MAXX of text is a variant measure.
   measureRef(m, env) {
     if (env.stack.includes(m)) throw semantic(`measure [${m.name}] refers to itself`);
+    if (env.boolFilter) throw semantic(`a True/False filter of CALCULATE cannot use a measure ([${m.name}]): it has to be FILTER over a table`);
     const ctx = this.transition(env);
-    return this.applyGroups(m, { ...env, ctx, rows: [], cg: null }, 0);
+    const x = this.applyGroups(m, { ...env, ctx, rows: [], cg: null }, 0);
+    return x.decl ? { ...x, dax: x.decl } : x;
   }
   measureBody(m, env) {
     m.ast ??= parse(m.text, `measure [${m.name}]`);
@@ -367,11 +393,11 @@ export class Compiler {
     return { ...env, rows: [...env.rows, row], shadows };
   }
 
-  // Whether a table can have DAX's blank row: it is the one side of a relationship whose many
-  // side may hold keys it lacks.
+  // Whether a table can have DAX's blank row: it is the one side of a relationship whose other
+  // side may hold keys it lacks (model.oneSides).
   blankRowRels(table) {
     if (this.options.blankRows === false || this.options.assumeIntegrity) return [];
-    return this.model.relationships.filter(r => r.to.table === table && r.fromCard === 'many' && r.toCard === 'one' && !r.ri);
+    return this.model.oneSides(table);
   }
 
   // Context transition: each row context becomes filters on its columns.
@@ -419,6 +445,8 @@ export class Compiler {
         throw semantic(`there is no variable ${ast.name}`);
       }
       case 'var': return this.scalar(ast.body, this.withVars(ast.defs, env));
+      // A column of a visual calculation's (functions/visual.js).
+      case 'visual': return this.scalar(ast.e, { ...env, visual: ast });
       case 'neg': return ir.op('neg', this.scalar(ast.e, env));
       case 'not': return ir.op('not', this.scalar(ast.e, env));
       case 'bin': {
@@ -439,6 +467,9 @@ export class Compiler {
   }
 
   call(ast, env) {
+    // CURRENTGROUP() is the table of one of GROUPBY's aggregations only.
+    if (ast.args?.[0]?.k === 'call' && ast.args[0].fn === 'CURRENTGROUP' && !GROUPBY_AGGREGATES.has(ast.fn))
+      throw semantic(`GROUPBY's expressions aggregate CURRENTGROUP() with ${[...GROUPBY_AGGREGATES].join(', ')}, not ${ast.fn}`);
     const f = SCALAR.get(ast.fn);
     if (f) return f(this, ast.args, env, ast);
     if (TABLE.has(ast.fn)) return this.single(this.table(ast, env));
@@ -515,6 +546,7 @@ export class Compiler {
         return this.scan(this.model.table(ast.name), env.ctx);
       }
       case 'var': return this.table(ast.body, this.withVars(ast.defs, env));
+      case 'visualtable': return visualTable(this, ast, env);
       case 'call': {
         const f = TABLE.get(ast.fn);
         if (!f) {
@@ -603,7 +635,7 @@ export class Compiler {
         });
       }
       const m = MODIFIERS.get(ast.fn);
-      if (m) return [m(this, ast.args, env)];
+      if (m) return [m(this, ast.args, env, ast)].flat();
     }
     if (this.isTable(ast, env)) {
       const f = this.tableFilter(this.table(ast, env), env.ctx);
@@ -643,7 +675,7 @@ export class Compiler {
     const tables = new Set(cols.map(c => c.table));
     if (tables.size > 1) throw semantic(`a CALCULATE filter can name the columns of one table only (${[...tables].map(t => `'${t.name}'`).join(', ')})`);
     const row = ir.newRow(cols.map(c => ({ name: c.name, lineage: c, t: c.type })), 'virtual', { open: true });
-    const pred = this.scalar(ast, { ...env, rows: [...env.rows, row] });
+    const pred = this.scalar(ast, { ...env, rows: [...env.rows, row], boolFilter: row });
     row.open = false;
     if (!row.cols.length) throw semantic('a CALCULATE filter has to name a column');
     return { kind: 'pred', cols: row.cols.map(c => c.lineage), row, pred };
@@ -710,6 +742,8 @@ export class Compiler {
   }
 }
 
+const GROUPBY_AGGREGATES = new Set(['SUMX', 'AVERAGEX', 'MINX', 'MAXX', 'COUNTX', 'COUNTAX', 'PRODUCTX', 'GEOMEANX',
+  'STDEVX.S', 'STDEVX.P', 'VARX.S', 'VARX.P']);
 const BINOPS = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div', '^': 'pow', '&': 'concat', '=': 'eq', '==': 'eqs',
   '<>': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge', '&&': 'and', '||': 'or' };
 
@@ -759,14 +793,11 @@ const colOf = x => (typeof x.ref === 'number' ? x.row.cols[x.ref].lineage ?? x.r
 const colIndex = x => (typeof x.ref === 'number' ? x.ref : x.row.cols.findIndex(c => c.lineage === x.ref));
 // The filters on a calculation group's columns.
 const groupFilters = (g, ctx) => ctx.filters.filter(f => f.cols.some(c => c.table === g.table));
-// The filters that select a calculation group's item: those on its name column; with none,
-// those on its other columns (the ordinal stands for an item too). A filter on the name
-// does not meet one on the ordinal: name "PY" with the ordinal of another item still
-// applies PY, though no row of the group's table has both.
-const itemFilters = (g, ctx) => {
-  const all = groupFilters(g, ctx), named = all.filter(f => f.cols.includes(g.column));
-  return named.length ? named : all;
-};
+// The filters that select a calculation group's item: those on its name column (a table
+// filter of the group's rows filters it too). A filter on the ordinal alone selects none,
+// so the measure is left as it is; nor does it meet one on the name: name "PY" with the
+// ordinal of another item still applies PY, though no row of the group's table has both.
+const itemFilters = (g, ctx) => groupFilters(g, ctx).filter(f => f.cols.includes(g.column));
 // DAX's =: text without regard to case.
 const sameValue = (a, b) => (typeof a === 'string' && typeof b === 'string' ? a.toLowerCase() === b.toLowerCase() : a === b);
 

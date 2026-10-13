@@ -11,7 +11,7 @@
 // Besides tables of the lakehouse (an entity partition), a table can be calculated (a DAX
 // table expression, `calc`) or a calculation group (`calcGroup`: its items); `roles` hold the
 // row-level security filters of each role.
-import { semantic } from './errors.js?v=c5d087d';
+import { semantic } from './errors.js?v=09facaa';
 
 const TYPES = { string: 'string', int64: 'int', double: 'double', decimal: 'decimal', dateTime: 'datetime',
   boolean: 'bool', binary: 'string', variant: 'variant', unknown: 'variant' };
@@ -57,7 +57,7 @@ export class Model {
         type: TYPES[c.dataType] ?? 'variant',
         source: c.sourceColumn ?? c.name,
         expr: c.type === 'calculated' ? text(c.expression) : null,
-        unique: !!c.isKey, dataCategory: c.dataCategory ?? null,
+        unique: !!c.isKey, nullable: c.isNullable !== false, dataCategory: c.dataCategory ?? null,
         // The fields column of a field parameter (Power BI marks it in its extended properties).
         fieldParameter: (c.extendedProperties ?? []).some(p => p.name === 'ParameterMetadata'),
       };
@@ -173,13 +173,13 @@ export class Model {
   }
 
   // Two join paths along which the rows a role keeps of table `from` reach table `to`, when
-  // one of them crosses a relationship that `state` (a CROSSFILTER) makes filter from its many
-  // side to its one side for the query only; null otherwise. Security moves along the
+  // one of them crosses relationship `only`, which `state` (a CROSSFILTER) makes filter from its
+  // many side to its one side for the query only; null otherwise. Security moves along the
   // relationships as securityState says, and the secured rows of that many side filter its
   // one side. DAX joins the tables that filter a table as a tree, so a second path is an
   // error: a secured table that filters a fact table is filtered back by it, say. Each path
   // is the list of its tables.
-  securityPaths(from, to, state) {
+  securityPaths(from, to, state, only) {
     const edges = [];
     for (const { rel, active, cross } of this.securityState()) {
       if (!active || rel.security === 'none') continue;
@@ -187,7 +187,7 @@ export class Model {
       if (cross === 'both') edges.push({ a: rel.from.table, b: rel.to.table, query: false });
     }
     for (const { rel, active, cross } of state) {
-      if (!active || rel.fromCard !== 'many' || rel.toCard !== 'one' || rel.cross !== 'single') continue;
+      if (rel !== only || !active || rel.fromCard !== 'many' || rel.toCard !== 'one' || rel.cross !== 'single') continue;
       if (rel.security === 'both' || cross !== 'both' && cross !== 'reverse') continue;
       edges.push({ a: rel.from.table, b: rel.to.table, query: true });
     }
@@ -250,6 +250,20 @@ export class Model {
       if (rel.to.table === table && rel.fromCard === 'many' && (cross === 'both' || cross === 'reverse' || mm && cross !== 'single'))
         out.push({ rel, here: rel.to, there: rel.from });
       if (mm && rel.from.table === table && cross !== 'reverse') out.push({ rel, here: rel.from, there: rel.to });
+    }
+    return out;
+  }
+
+  // The relationships `table` is a one side of, whose other side may hold keys it lacks (they
+  // do not rely on referential integrity): the one side of a many-to-one relationship, and
+  // either side of a one-to-one relationship. [{ rel, one: column of `table`, many: the other
+  // side's }]. The rows of the other side whose key `table` lacks belong to its blank row.
+  oneSides(table) {
+    const out = [];
+    for (const r of this.relationships) {
+      if (r.ri || r.toCard !== 'one') continue;
+      if (r.to.table === table) out.push({ rel: r, one: r.to, many: r.from });
+      if (r.fromCard === 'one' && r.from.table === table) out.push({ rel: r, one: r.from, many: r.to });
     }
     return out;
   }

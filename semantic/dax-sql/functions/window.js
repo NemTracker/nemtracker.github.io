@@ -7,9 +7,10 @@
 // the column to (a group key, a context transition). A column with no outer value takes each
 // of its values in the filter context, and the result is the union over them. With no
 // relation, it is ALLSELECTED of the ORDERBY and PARTITIONBY columns.
-import * as ir from '../ir.js?v=c5d087d';
-import { semantic, unsupported } from '../errors.js?v=c5d087d';
-import { isDesc } from './aggregate.js?v=c5d087d';
+import * as ir from '../ir.js?v=09facaa';
+import { semantic, unsupported } from '../errors.js?v=09facaa';
+import { isDesc } from './aggregate.js?v=09facaa';
+import { visualWindow, isReset } from './visual.js?v=09facaa';
 
 const lc = s => String(s).toLowerCase();
 const word = (a, set) => a?.k === 'name' && set.includes(a.name.toUpperCase());
@@ -17,17 +18,23 @@ const BLANKS = ['DEFAULT', 'FIRST', 'LAST'];
 
 // The arguments after the leading ones: relation, ORDERBY(), blanks, PARTITIONBY(), MATCHBY().
 function windowArgs(c, args, env, fn) {
-  let relAst = null, orderAst = null, partAst = null, matchAst = null, blanks = 'default';
+  let relAst = null, orderAst = null, partAst = null, matchAst = null, blanks = 'default', axisName = null, resetAst = null;
   for (const a of args) {
     if (a.k === 'empty') continue;
     if (a.k === 'call' && a.fn === 'ORDERBY') orderAst = a;
     else if (a.k === 'call' && a.fn === 'PARTITIONBY') partAst = a;
     else if (a.k === 'call' && a.fn === 'MATCHBY') matchAst = a;
     else if (word(a, BLANKS)) blanks = a.name.toLowerCase();
-    else if (word(a, ['NONE', 'LOWESTPARENT', 'HIGHESTPARENT'])) throw unsupported(`${fn}'s reset (visual calculations only)`);
-    else if (!relAst && c.isTable(a, env)) relAst = a;
+    else if (env.visual && word(a, ['ROWS', 'COLUMNS'])) {
+      if (axisName) throw unsupported(`${fn} over more than one axis`);
+      axisName = a.name;
+    } else if (isReset(a)) {
+      if (!env.visual) throw semantic(`${fn}: a reset is only valid in a visual calculation`);
+      resetAst = a;
+    } else if (!relAst && c.isTable(a, env)) relAst = a;
     else throw semantic(`${fn}: unexpected argument`);
   }
+  if (resetAst && (orderAst || partAst)) throw semantic('The RESET parameter cannot be used in combination with ORDERBY or PARTITIONBY.');
   // ORDERBY(expr, [ASC|DESC], [FIRST|LAST|DEFAULT], ...)
   const order = [];
   if (orderAst) {
@@ -44,9 +51,13 @@ function windowArgs(c, args, env, fn) {
     }
   }
   const part = partAst?.args ?? [], match = matchAst?.args ?? null;
+  // In a visual calculation's column, no relation is the visual's rows (functions/visual.js).
+  const visual = relAst || !env.visual ? null : visualWindow(c, env, { axisName, resetAst });
+  if (visual && !orderAst) order.push(...visual.order);
 
   let rel;
   if (relAst) rel = c.table(relAst, env);
+  else if (visual) rel = visual.rel;
   else {
     if (!orderAst) throw semantic(`${fn} needs a relation or an ORDERBY`);
     const cols = [...order.map(o => o.ast), ...part].map(a => {
@@ -59,7 +70,7 @@ function windowArgs(c, args, env, fn) {
     const ctx = c.allSelected(env.ctx.removeAll(), env, new Set(unique), true);
     rel = ir.values(unique[0].table, ctx, unique, (t, x) => c.scan(t, x), c.blankRowRels(unique[0].table).length > 0);
   }
-  const row = ir.rowOf(rel, 'table'), inner = c.iter(env, row);
+  const row = visual ? visual.row : ir.rowOf(rel, 'table'), inner = c.iter(env, row);
   const index = (a, what) => {
     if (a.k !== 'col') throw semantic(`${fn}: ${what} takes columns`);
     let i = a.table ? rel.cols.findIndex(x => x.lineage && lc(x.lineage.table.name) === lc(a.table) && lc(x.lineage.name) === lc(a.name)) : -1;
@@ -67,25 +78,20 @@ function windowArgs(c, args, env, fn) {
     if (i < 0) throw semantic(`${fn}: the relation has no column ${a.table ? `'${a.table}'` : ''}[${a.name}]`);
     return i;
   };
-  // PARTITIONBY: columns of the relation, or of a table related to it (read with RELATED).
-  // Not a column a table function added (one with no lineage): DAX rejects it.
-  const partExprs = [], parts = [];
-  for (const a of part) {
-    let i = -1;
-    try { i = index(a, 'PARTITIONBY'); } catch (e) {
-      if (!(a.k === 'col' && a.table && rel.base && c.model.findColumn(a.table, a.name))) throw e;
-    }
-    if (i >= 0 && !rel.cols[i].lineage) throw semantic(`PARTITIONBY cannot be used with columns added by table functions ([${rel.cols[i].name}])`);
-    if (i >= 0) { parts.push(i); partExprs.push(ir.col(row, i)); } else partExprs.push(c.scalar({ k: 'call', fn: 'RELATED', args: [a] }, inner));
-  }
-  const related = partExprs.length > parts.length;
+  // PARTITIONBY: columns of the relation, not those of a table related to it, nor a column a
+  // table function added (one with no lineage): DAX rejects both.
+  const parts = part.map(a => {
+    const i = index(a, 'PARTITIONBY');
+    if (!rel.cols[i].lineage) throw semantic(`PARTITIONBY cannot be used with columns added by table functions ([${rel.cols[i].name}])`);
+    return i;
+  });
+  const partExprs = [...parts.map(i => ir.col(row, i)), ...(visual?.parts ?? [])];
   const orderBy = order.length
     ? order.map(o => { const expr = c.scalar(o.ast, inner); return { expr, desc: o.desc, blanks: o.blanks ?? blanks, t: expr.t }; })
     : rel.cols.map((x, i) => (parts.includes(i) ? null : { expr: ir.col(row, i), desc: false, blanks, t: x.t })).filter(Boolean);
-  // The columns that say which row is the current one. With a related table's column in
-  // PARTITIONBY, the whole row (its partition follows from it).
-  const matched = match ? [...new Set([...match.map(a => index(a, 'MATCHBY')), ...(related ? allCols({ rel }) : parts)])] : null;
-  return { rel, row, orderBy, parts: related ? null : parts, partExprs, matched, hasMatch: !!match };
+  // The columns that say which row is the current one.
+  const matched = match ? [...new Set([...match.map(a => index(a, 'MATCHBY')), ...parts])] : null;
+  return { rel, row, orderBy, parts, partExprs, matched, hasMatch: !!match, visual: !!visual };
 }
 
 // The current row's columns' outer values; those with none, from their values in context.
@@ -129,18 +135,9 @@ function node(k, fn, w, cur, extra) {
     match: cur.match, unbound: cur.unbound, cols: w.rel.cols, base: w.rel.base, ...extra };
 }
 const allCols = w => w.rel.cols.map((_, i) => i);
-// The columns that say which partition is the current one: PARTITIONBY's (all of the
-// relation's when one is a related table's).
-const partCols = w => w.parts ?? allCols(w);
-// RANK's current row: the ORDERBY and PARTITIONBY columns, as the documentation says (when
-// every ORDERBY expression is a column of the relation; else the whole row). Rows tied on
-// them share the rank.
-function rankCols(w) {
-  if (!w.parts) return allCols(w);
-  const ids = w.orderBy.map(o => (o.expr.k === 'col' && o.expr.row === w.row
-    ? (typeof o.expr.ref === 'number' ? o.expr.ref : w.rel.cols.findIndex(c => c.lineage === o.expr.ref)) : -1));
-  return ids.includes(-1) ? allCols(w) : [...new Set([...ids, ...w.parts])];
-}
+// The columns that say which partition is the current one: PARTITIONBY's; in a visual
+// calculation, whose partitions are expressions, the current row's.
+const partCols = w => (w.visual ? allCols(w) : w.parts);
 
 function offset(c, args, env) {
   const delta = c.scalar(args[0], env);
@@ -175,7 +172,7 @@ function rank(fn) {
     if (fn === 'rank' && word(args[0], ['DENSE', 'SKIP'])) { dense = args[0].name.toUpperCase() === 'DENSE'; rest = args.slice(1); }
     else if (fn === 'rank' && args[0]?.k === 'empty') rest = args.slice(1);
     const w = windowArgs(c, rest, env, fn.toUpperCase());
-    const x = node('wrank', fn, w, currentRow(c, env, w.rel, w.matched ?? (fn === 'rank' ? rankCols(w) : allCols(w))), { dense, needCur: true });
+    const x = node('wrank', fn, w, currentRow(c, env, w.rel, w.matched ?? allCols(w)), { dense, needCur: true });
     return { ...x, t: 'int', nn: false };
   };
 }

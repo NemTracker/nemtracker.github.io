@@ -21,21 +21,23 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=c5d087d';
-import { Compiler } from './compiler.js?v=c5d087d';
-import { Emitter } from './emit.js?v=c5d087d';
-import { parseExpression } from './parser.js?v=c5d087d';
-import { DuckDBDialect } from './dialects/duckdb.js?v=c5d087d';
-import { Dialect } from './dialects/base.js?v=c5d087d';
-import { newRow } from './ir.js?v=c5d087d';
-import { DaxError, semantic } from './errors.js?v=c5d087d';
-import { Ctx } from './context.js?v=c5d087d';
+import { Model } from './model.js?v=09facaa';
+import { Compiler } from './compiler.js?v=09facaa';
+import { Emitter } from './emit.js?v=09facaa';
+import { parseExpression } from './parser.js?v=09facaa';
+import { DuckDBDialect } from './dialects/duckdb.js?v=09facaa';
+import { Dialect } from './dialects/base.js?v=09facaa';
+import { newRow } from './ir.js?v=09facaa';
+import { DaxError, semantic } from './errors.js?v=09facaa';
+import { Ctx } from './context.js?v=09facaa';
+import { SqlTranslator, isSql } from './sql.js?v=09facaa';
 
-export { DaxError } from './errors.js?v=c5d087d';
-export { Dialect } from './dialects/base.js?v=c5d087d';
-export { DuckDBDialect } from './dialects/duckdb.js?v=c5d087d';
-export { parseQuery, parseExpression } from './parser.js?v=c5d087d';
-export { Model } from './model.js?v=c5d087d';
+export { DaxError } from './errors.js?v=09facaa';
+export { Dialect } from './dialects/base.js?v=09facaa';
+export { DuckDBDialect } from './dialects/duckdb.js?v=09facaa';
+export { parseQuery, parseExpression } from './parser.js?v=09facaa';
+export { parseSql } from './sql.js?v=09facaa';
+export { Model } from './model.js?v=09facaa';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
@@ -118,11 +120,19 @@ export function createCompiler(bim, options = {}) {
     cache.set(dax, out);
     return out;
   }
+  // A SELECT over the model: its DAX, compiled, with its LIMIT and OFFSET.
+  const sqlTranslator = new SqlTranslator(model);
+  function compileSql(text) {
+    const { dax, limit, offset } = sqlTranslator.translate(text);
+    const [out] = compileAll(dax);
+    return limit == null && offset == null ? out : { ...out, sql: out.sql + dialect.limit(limit, offset) };
+  }
   return {
     model,
     dialect,
-    // One EVALUATE -> { sql, columns: [{ name, dax, type, lineage }] }.
+    // One EVALUATE, or a SELECT over the model -> { sql, columns: [{ name, dax, type, lineage }] }.
     compile(dax) {
+      if (isSql(dax)) return compileSql(dax);
       const out = compileAll(dax);
       if (out.length !== 1) throw new DaxError(`the query has ${out.length} EVALUATE statements; use compileAll`);
       return out[0];
@@ -130,6 +140,10 @@ export function createCompiler(bim, options = {}) {
     compileAll,
     // Whether a text is a DAX query (it starts with DEFINE or EVALUATE).
     isDax: text => /^\s*(DEFINE|EVALUATE)\b/i.test(text),
+    // Whether a text is a SELECT over the model, and the DAX query it stands for, with its
+    // LIMIT and OFFSET ({ dax, limit, offset }).
+    isSql,
+    sqlToDax: text => sqlTranslator.translate(text),
     fieldParameters: () => fieldParameters(model),
     // The fields a field parameter's selection stands for (all of them without `labels`), in
     // its order: what Power BI puts in a visual's query in the parameter's place.

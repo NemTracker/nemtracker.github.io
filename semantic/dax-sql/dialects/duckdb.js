@@ -1,6 +1,6 @@
 // DuckDB (1.1 and later; tested on 1.5).
-import { Dialect } from './base.js?v=c5d087d';
-import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=c5d087d';
+import { Dialect } from './base.js?v=09facaa';
+import { formatNumber, formatDate, generalNumber, generalDate, dateSerial, serialDate } from './duckdb-format.js?v=09facaa';
 
 const UNIT_SQL = { day: 'DAY', week: 'WEEK', month: 'MONTH', quarter: 'QUARTER', year: 'YEAR', hour: 'HOUR', minute: 'MINUTE', second: 'SECOND' };
 
@@ -22,9 +22,9 @@ export class DuckDBDialect extends Dialect {
   blankAdd(a, b, sub) { return `list_sum([${a}, ${sub ? `-(${b})` : b}])`; }
 
   // As DAX converts: 3.0 as "3", 0.1 + 0.2 as "0.3" (15 digits), 1E+20; a date as 1/5/2024, with
-  // the time when it is not midnight; TRUE as "True".
+  // the time when it is not midnight; TRUE as "TRUE".
   text(sql, t) {
-    if (t === 'double' || t === 'decimal' || t === 'bool') return generalNumber(sql, t);
+    if (t === 'double' || t === 'decimal') return generalNumber(sql, t);
     if (t === 'datetime' || t === 'date') return `[${generalDate('dax_tv')} FOR dax_tv IN [${sql}]][1]`;
     return super.text(sql, t);
   }
@@ -50,6 +50,14 @@ export class DuckDBDialect extends Dialect {
       case 'least': return `least(${a.join(', ')})`;
       case 'divide': return a.length === 2 ? `(${x} / NULLIF(${y}, 0))`
         : `CASE WHEN COALESCE(${y}, 0) = 0 THEN ${z} ELSE ${x} / ${y} END`;
+      // A fixed decimal over a whole number: the exact quotient of ten-thousandths, rounded half
+      // away from zero. Over 0 (or, for /, a blank): as / and DIVIDE do with any number.
+      case 'cydiv': case 'cydivide': {
+        const zero = name === 'cydiv' ? 'CAST(sign(dax_q.n) AS DOUBLE) / 0' : z ?? 'NULL';
+        return `[CASE WHEN COALESCE(dax_q.d, 0) = 0 THEN ${zero}
+          ELSE sign(dax_q.n) * sign(dax_q.d) * ((2 * abs(dax_q.n) + abs(dax_q.d)) // (2 * abs(dax_q.d))) / 10000 END
+          FOR dax_q IN [{'n': CAST(round(${x} * 10000) AS HUGEINT), 'd': CAST(${y} AS HUGEINT)}]][1]`;
+      }
       case 'iseven': return `(CAST(trunc(${x}) AS BIGINT) % 2 = 0)`;
       case 'isodd': return `(CAST(trunc(${x}) AS BIGINT) % 2 <> 0)`;
       case 'error': return `error(${x})`;
@@ -62,6 +70,9 @@ export class DuckDBDialect extends Dialect {
       case 'mod': return `(${x} - ${y} * floor(${x} / ${y}))`;
       case 'quotient': return `CAST(trunc(${x} / ${y}) AS BIGINT)`;
       case 'round': return `round(${x}, CAST(${y} AS INTEGER))`;
+      // A fixed decimal: four places, within a 64-bit count of ten-thousandths (bound once).
+      case 'currency': return `[CASE WHEN abs(dax_c) >= 922337203685477.5808 THEN error('DAX: the result of a conversion or arithmetic operation is too large or too small for a fixed decimal number')
+        ELSE round(dax_c, 4) END FOR dax_c IN [${x}]][1]`;
       case 'roundup': return `(sign(${x}) * ceil(abs(${x}) * power(10, ${y})) / power(10, ${y}))`;
       case 'rounddown': case 'trunc': return `(trunc(${x} * power(10, ${y})) / power(10, ${y}))`;
       case 'int': return `CAST(floor(${x}) AS BIGINT)`;
@@ -79,7 +90,7 @@ export class DuckDBDialect extends Dialect {
       case 'left': return `left(${x}, ${y ?? 1})`;
       case 'right': return `right(${x}, ${y ?? 1})`;
       case 'mid': return `substring(${x}, ${y}, ${z})`;
-      case 'len': return `length(COALESCE(${x}, ''))`;
+      case 'len': return `length(${x})`;
       case 'upper': return `upper(${x})`;
       case 'lower': return `lower(${x})`;
       case 'trim': return `regexp_replace(trim(${x}), ' {2,}', ' ', 'g')`;
@@ -98,7 +109,7 @@ export class DuckDBDialect extends Dialect {
       case 'replace': return `(left(${x}, ${y} - 1) || ${w} || substring(${x}, ${y} + ${z}))`;
       case 'search': case 'find': {
         const low = s => (name === 'search' ? `lower(${s})` : s);
-        const pos = `instr(${low(`substring(${y}, ${z})`)}, ${low(x)})`;
+        const pos = `instr(${low(`substring(COALESCE(${y}, ''), ${z})`)}, ${low(`COALESCE(${x}, '')`)})`;
         return `CASE WHEN ${pos} = 0 THEN ${w} ELSE ${pos} + ${z} - 1 END`;
       }
       case 'rept': return `repeat(${x}, CAST(${y} AS INTEGER))`;
@@ -107,8 +118,9 @@ export class DuckDBDialect extends Dialect {
       case 'unicode': return `unicode(${x})`;
       case 'containsstring': return `contains(lower(COALESCE(${x}, '')), lower(COALESCE(${y}, '')))`;
       case 'containsstringexact': return `contains(COALESCE(${x}, ''), COALESCE(${y}, ''))`;
-      // A path's items: blank or "" is a path of none; a position past either end is blank.
-      case 'pathlength': return `COALESCE(length(string_split(NULLIF(${x}, ''), '|')), 0)`;
+      // A path's items: "" is a path of none, and a blank path's length is blank; a position past
+      // either end is blank.
+      case 'pathlength': return `CASE WHEN ${x} = '' THEN 0 ELSE length(string_split(${x}, '|')) END`;
       case 'pathitem': return `CASE WHEN ${y} >= 1 THEN string_split(NULLIF(${x}, ''), '|')[CAST(${y} AS BIGINT)] END`;
       case 'pathitemreverse': return `CASE WHEN ${y} >= 1 THEN string_split(NULLIF(${x}, ''), '|')[-CAST(${y} AS BIGINT)] END`;
       case 'pathcontains': return `COALESCE(list_contains(string_split(NULLIF(${x}, ''), '|'), ${y}), FALSE)`;
@@ -187,19 +199,23 @@ export class DuckDBDialect extends Dialect {
       case 'var_p': return `var_pop(${x})${f}`;
       case 'concat': return `string_agg(COALESCE(${x}, ''), ${extra.delim}${extra.order?.length ? ` ORDER BY ${extra.order.join(', ')}` : ''})${f}`;
       // The value at rank k(n - 1) + 1 (INC) or k(n + 1) (EXC) of the n values in order,
-      // between the two around it as that rank is between theirs. The blanks are values too:
-      // they count in n and come first, and a blank on either side of the rank gives blank.
-      // A rank outside 1..n is an error, as in DAX (for EXC, k outside 1/(n + 1)..n/(n + 1));
-      // no values give blank. The sorted values and the rank are bound once.
-      case 'pct_inc': case 'pct_exc': {
-        const i = 'CAST(floor(dax_r) AS BIGINT)', k = `COALESCE(${extra.k}, 0)`;
-        const r = fn === 'pct_inc' ? `${k} * (len(dax_l) - 1) + 1` : `${k} * (len(dax_l) + 1)`;
-        const range = fn === 'pct_inc' ? 'PERCENTILE.INC: k must lie in 0..1' : 'PERCENTILE.EXC: k must lie in 1/(n + 1)..n/(n + 1)';
+      // between the two around it as that rank is between theirs. A column's blanks are left
+      // out (pct_); an expression's are values too (pctx_): they count in n and come first. A
+      // rank on a blank is blank; between a blank and a value, the blank is 0 (between two
+      // blanks, blank). A rank outside 1..n is an error, as in DAX (for EXC, k outside
+      // 1/(n + 1)..n/(n + 1)); no values give blank. The sorted values and the rank are bound once.
+      case 'pct_inc': case 'pct_exc': case 'pctx_inc': case 'pctx_exc': {
+        const inc = fn.endsWith('_inc'), i = 'CAST(floor(dax_r) AS BIGINT)', k = `COALESCE(${extra.k}, 0)`;
+        const r = inc ? `${k} * (len(dax_l) - 1) + 1` : `${k} * (len(dax_l) + 1)`;
+        const range = inc ? 'PERCENTILE.INC: k must lie in 0..1' : 'PERCENTILE.EXC: k must lie in 1/(n + 1)..n/(n + 1)';
+        const lo = `COALESCE(dax_l[${i}], 0)`;
         const body = `CASE WHEN len(dax_l) = 0 THEN NULL
           WHEN dax_r < 1 OR dax_r > len(dax_l) THEN error('${range}')
           WHEN dax_r = ${i} THEN dax_l[${i}]
-          ELSE dax_l[${i}] + (dax_r - ${i}) * (dax_l[${i} + 1] - dax_l[${i}]) END`;
-        return `[[${body} FOR dax_r IN [${r}]][1] FOR dax_l IN [COALESCE(list(${x} ORDER BY ${x} ASC NULLS FIRST)${f}, [])]][1]`;
+          ELSE ${lo} + (dax_r - ${i}) * (dax_l[${i} + 1] - ${lo}) END`;
+        const keep = fn.startsWith('pctx_') ? f
+          : ` FILTER (WHERE ${x} IS NOT NULL${extra.filter ? ` AND ${extra.filter}` : ''})`;
+        return `[[${body} FOR dax_r IN [${r}]][1] FOR dax_l IN [COALESCE(list(${x} ORDER BY ${x} ASC NULLS FIRST)${keep}, [])]][1]`;
       }
     }
     return super.agg(fn, x);

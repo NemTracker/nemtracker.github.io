@@ -37,7 +37,7 @@
 //   paths    { key, parent }         a row per row of a parent-child table, over all its rows:
 //                                    its key and PATH(key, parent)
 
-import { semantic } from './errors.js?v=c5d087d';
+import { semantic } from './errors.js?v=09facaa';
 
 let nextId = 1;
 export const newRow = (cols, kind = 'table', extra = {}) => ({ id: nextId++, cols, kind, ...extra });
@@ -100,36 +100,84 @@ export function op(o, ...a) {
   const nn = t === 'bool' || o === 'concat' || (o === 'add' || o === 'sub') && (l.nn || r.nn)
     || (o === 'mul' || o === 'neg') && a.every(x => x.nn);
   const x = { k: 'op', op: o, a, t, nn };
+  if (fx && o === 'div' && r.t === 'int') return currency(fn('cydiv', a, 'double', { strict: true }));
   return fx && t !== 'decimal' ? currency(x) : x;
 }
 // A fixed decimal (currency) with a number, as DAX types it: + and - with a whole number or
 // another fixed decimal are one; * by a whole or decimal number (either side), and / by one,
-// are one too, rounded to its four places (half away from zero). Two of them multiplied or
-// divided, and one with a decimal number added, give a decimal number.
+// are one too, rounded to its four places (half away from zero; past a fixed decimal's range,
+// an error). Divided by a whole number, the quotient rounded is the exact one (`cydiv`, of
+// ten-thousandths), not a decimal number's that can fall just short of a half. Two of them
+// multiplied or divided, and one with a decimal number added, give a decimal number.
 const fixed = (o, a, b) => {
   const n = t => t === 'int' || t === 'double';
   if (o === 'add' || o === 'sub') return (a === 'decimal' || b === 'decimal') && [a, b].every(t => t === 'decimal' || t === 'int');
   if (o === 'mul') return (a === 'decimal' && n(b)) || (n(a) && b === 'decimal');
   return o === 'div' && a === 'decimal' && n(b);
 };
-export const currency = x => fn('round', [x, lit(4)], 'decimal', { strict: true });
+export const currency = x => fn('currency', [x], 'decimal', { strict: true });
+// The value of a constant: a literal, or numbers and logicals compared or combined by
+// operators. Undefined when it is not one, or not one worked out here (a blank or a text
+// inside, a division by zero), which then stays to SQL.
+export function valueOf(x) {
+  if (x.k === 'lit') return x.v;
+  if (x.k !== 'op') return undefined;
+  const [l, r] = x.a.map(valueOf);
+  const num = v => typeof v === 'number', logical = v => typeof v === 'boolean';
+  const one = x.a.length === 1;
+  const nums = num(l) && (one || num(r)), logicals = logical(l) && (one || logical(r));
+  switch (x.op) {
+    case 'not': return logicals ? !l : undefined;
+    case 'bool': return logicals ? l : nums ? l !== 0 : undefined;
+    case 'and': return logicals ? l && r : undefined;
+    case 'or': return logicals ? l || r : undefined;
+    case 'neg': return nums ? -l : undefined;
+    case 'add': return nums ? l + r : undefined;
+    case 'sub': return nums ? l - r : undefined;
+    case 'mul': return nums ? l * r : undefined;
+    case 'div': return nums && r !== 0 ? l / r : undefined;
+    case 'eq': case 'eqs': return nums || logicals ? l === r : undefined;
+    case 'ne': return nums || logicals ? l !== r : undefined;
+    case 'lt': return nums ? l < r : undefined;
+    case 'le': return nums ? l <= r : undefined;
+    case 'gt': return nums ? l > r : undefined;
+    case 'ge': return nums ? l >= r : undefined;
+  }
+  return undefined;
+}
 const boolOf = x => x.t === 'bool' && x.nn ? x : { k: 'op', op: 'bool', a: [x], t: 'bool', nn: true };
 
 // `strict`: the function gives a blank when its first argument is blank (and on a constant
 // blank, is one).
 export const fn = (name, a, t, { nn = false, strict = false } = {}) =>
   strict && a[0]?.k === 'lit' && a[0].v === null ? lit(null, t) : ({ k: 'fn', name, a, t, nn, strict });
-export function kase(w, e, t) {
+// IF and SWITCH: the type is that of all their branches (and of `others`, the types of branches
+// a condition known when compiling left out), as DAX types them before it evaluates anything.
+export function kase(w, e, t, others = []) {
+  const types = [...w.map(x => x[1].t), e?.t, ...others];
+  const one = v => (t ? v : widen(v, types));
   w = w.filter(([c]) => !isLit(c, false) && !(c.k === 'lit' && c.v === null));
   const first = w.findIndex(([c]) => isLit(c, true));
-  if (first === 0) return w[0][1];
+  if (first === 0) return one(w[0][1]);
   if (first > 0) { e = w[first][1]; w = w.slice(0, first); }
   e ??= BLANK;
-  if (!w.length) return e;
+  if (!w.length) return one(e);
   const all = [...w.map(x => x[1]), e];
-  t ??= unify(all.map(x => x.t));
+  t ??= wider(unify(all.map(x => x.t)), types);
   const x = { k: 'case', w, e, t, nn: all.every(x => x.nn) };
-  return all.some(v => v.dax) ? { ...x, dax: unify(all.map(v => v.dax ?? v.t)) } : x;
+  // A branch's DAX type (`dax`) and the type a measure of it declares (`decl`) carry over.
+  const typed = key => all.some(v => v[key]) ? { [key]: unify(all.map(v => v[key] ?? v.dax ?? v.t)) } : {};
+  return { ...x, ...typed('dax'), ...typed('decl') };
+}
+// A number as the wider number type of `types` too, when they are all numbers: the branch an
+// IF keeps of a fixed decimal and a decimal number is a decimal number.
+const wider = (t, types) => {
+  const ts = types.filter(x => x && x !== 'blank');
+  return isNum(t) && ts.every(isNum) ? unify([t, ...ts]) : t;
+};
+export function widen(v, types) {
+  const u = wider(v.t, types);
+  return u === v.t ? v : fn('cast', [v, lit(u, 'string')], u, { strict: true, nn: v.nn });
 }
 export const agg = (f, src, row, arg, t, a = []) => ({ k: 'agg', fn: f, src, row, arg, a, t, nn: false });
 export const exists = src => ({ k: 'exists', src, t: 'bool', nn: true });
@@ -297,4 +345,11 @@ export function rowRefs(x, rowId, out = new Set(), seen = new Set()) {
     else if (v && typeof v === 'object') rowRefs(v, rowId, out, seen);
   }
   return out;
+}
+
+// A column a table function names like a column of a table ("'Table'[Column]", "Table[Column]"):
+// DAX calls it Table[Column], and a query can name it so. -> { table, name } or null.
+export function qualifiedName(name) {
+  const m = /^(?:'((?:[^']|'')+)'|([^'[\]]+))\[(.+)\]$/.exec(String(name));
+  return m ? { table: (m[1] ?? m[2]).replace(/''/g, "'"), name: m[3] } : null;
 }
