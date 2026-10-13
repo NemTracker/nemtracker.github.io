@@ -14,7 +14,7 @@
 
 // Stamped at deploy (build.yml: the git sha; fabric_app/common/build.mjs: sha + build time). Shown in the
 // Logs tab so a cached bundle is obvious.
-export const BUILD = 'a443dda';
+export const BUILD = '3b696d2';
 
 const CHANNEL = 'perflog-http';
 const MAX_EVENTS = 5000;
@@ -74,7 +74,9 @@ export const perf = {
       perf.log('query', what, { ...timing(), status: `${result.numRows} rows`, dax });
       return result;
     } catch (e) {
-      perf.log('error', what, { ...timing(), status: String(e?.message || e), dax });
+      // Dropped by the queue before it ran (storage/queue.js): not an error, and no run.
+      if (e?.skipped) perf.log('skip', what, { status: 'replaced by a newer render', dax });
+      else perf.log('error', what, { ...timing(), status: String(e?.message || e), dax });
       throw e;
     }
   },

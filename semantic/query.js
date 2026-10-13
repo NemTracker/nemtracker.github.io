@@ -44,7 +44,7 @@
 // dashboard/fabric_app/vertipaq) gets the query's DAX as it is: no views, no SQL.
 // =============================================================================
 
-import { createCompiler } from './dax-sql/index.js?v=a443dda';
+import { createCompiler } from './dax-sql/index.js?v=3b696d2';
 
 // The model, fetched next to this file, with this file's ?v= (the Fabric build's cache-buster).
 const BIM = await (await fetch(new URL('./model.bim' + new URL(import.meta.url).search, import.meta.url))).json();
@@ -218,12 +218,13 @@ export function createModel(data) {
     ...data,
     // The page's query, an object or a SELECT over the model, becomes SQL over the views; the
     // SQL and the DAX go to the Logs tab. Nothing else: DAX text, or SQL of the views, is
-    // refused, so the page asks in the model's words.
-    query: async q => {
-      if (typeof q !== 'string') { const dax = toDax(q); return data.query(toSQL(dax), dax); }
+    // refused, so the page asks in the model's words. `options` go to the data source (its
+    // queue: `stale`, `early`, `later`).
+    query: async (q, options) => {
+      if (typeof q !== 'string') { const dax = toDax(q); return data.query(toSQL(dax), dax, options); }
       if (DAX.isDax(q)) throw new Error('DAX is written by the compiler: send the query as an object');
       const { sql, dax } = fromSql(q);
-      return data.query(sql, dax);
+      return data.query(sql, dax, options);
     },
     // Analyze, as typed: SQL over the views, each SELECT ... FROM model in it compiled as the
     // page's are. `sql` is what runs (with its LIMIT and OFFSET); `query` runs SQL built round

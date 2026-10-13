@@ -21,9 +21,10 @@
 // =============================================================================
 
 import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev65.0/+esm";
-import { periodsForRange, attachCached } from "./history.js?v=a443dda";
-import { withViews } from "./views.js?v=a443dda";
-import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=a443dda";
+import { periodsForRange, attachCached } from "./history.js?v=3b696d2";
+import { withViews } from "./views.js?v=3b696d2";
+import { serialQueue } from "./queue.js?v=3b696d2";
+import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=3b696d2";
 
 export function createDataSource({ onStatus = () => {} } = {}) {
   let conn;
@@ -195,9 +196,12 @@ export function createDataSource({ onStatus = () => {} } = {}) {
     return (await Promise.all(needed.map(attachOnce))).includes(true);
   }
 
+  // `dax`: the query as the page wrote it, for the Logs tab (the compiler passes it).
+  // `options`: the page's for the queue (queue.js): `stale`, `early`, `later`. The Logs tab's timer
+  // starts when the page asks, so a query's wait is its time in the queue.
+  const serial = serialQueue();
   return withViews({
     init, attachAgg, ensureHistory,
-    // `dax`: the query as the page wrote it, for the Logs tab (the compiler passes it).
-    query: (sql, dax) => perf.query(sql, () => conn.query(sql), dax),
+    query: (sql, dax, options) => perf.query(sql, () => serial(() => conn.query(sql), options), dax),
   });
 }
