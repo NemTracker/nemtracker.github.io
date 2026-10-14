@@ -37,7 +37,7 @@
 //   paths    { key, parent }         a row per row of a parent-child table, over all its rows:
 //                                    its key and PATH(key, parent)
 
-import { semantic } from './errors.js?v=45b71a6';
+import { semantic } from './errors.js?v=a6bcd42';
 
 let nextId = 1;
 export const newRow = (cols, kind = 'table', extra = {}) => ({ id: nextId++, cols, kind, ...extra });
