@@ -311,10 +311,10 @@
   </dialog>
 
 <script type="module">
-import { createDataSource } from '../storage/data.js?v=4ee221c';
-import { connect, createQueries } from '../frontend/queries.js?v=4ee221c';
-import { perf } from '../frontend/perflog.js?v=4ee221c';
-import { renderModel } from '../frontend/model.js?v=4ee221c';
+import { createDataSource } from '../storage/data.js?v=9f555af';
+import { connect, createQueries } from '../frontend/queries.js?v=9f555af';
+import { perf } from '../frontend/perflog.js?v=9f555af';
+import { renderModel } from '../frontend/model.js?v=9f555af';
 
 const $ = id => document.getElementById(id);
 const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
