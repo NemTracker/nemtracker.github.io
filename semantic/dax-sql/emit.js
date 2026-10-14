@@ -12,9 +12,9 @@
 // its expanded table (joined from the scan's table through the relationships, or read off
 // the foreign key when the relationship relies on referential integrity), and the filters
 // that reach it over bidirectional or many-to-many relationships, as semi-joins.
-import * as ir from './ir.js?v=943ff22';
-import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=943ff22';
-import { semantic } from './errors.js?v=943ff22';
+import * as ir from './ir.js?v=dc6b007';
+import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=dc6b007';
+import { semantic } from './errors.js?v=dc6b007';
 
 const lc = s => String(s).toLowerCase();
 
@@ -255,11 +255,11 @@ export class Emitter {
     });
   }
 
-  // A stored column of an imported table, on the row of `alias`: text without its trailing
-  // spaces, which the model drops as it loads the data ("a " is "a").
+  // A stored column, on the row of `alias`, as the data has it: text keeps its trailing spaces,
+  // which the model drops as it loads the data (by design: trimming every row of a scan costs
+  // more than the difference is worth).
   stored(alias, c) {
-    const sql = `${alias}.${this.ident(c.source)}`;
-    return c.type === 'string' && !c.table.calc && !c.table.calcGroup ? this.d.storedText(sql) : sql;
+    return `${alias}.${this.ident(c.source)}`;
   }
 
   source(table) {
