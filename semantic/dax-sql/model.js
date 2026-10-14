@@ -25,7 +25,7 @@
 // A table is one of the lakehouse (`source`, else its name), calculated (`dax`: `calc` here)
 // or a calculation group (`calcGroup`: its items); `roles` hold the row-level security
 // filters of each role.
-import { semantic } from './errors.js?v=e31b477';
+import { semantic } from './errors.js?v=b479736';
 
 const TYPES = new Set(['string', 'int', 'double', 'decimal', 'datetime', 'bool', 'variant']);
 
