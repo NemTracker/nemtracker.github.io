@@ -36,7 +36,7 @@
 // semantic/query.js, which turns a query into DAX and the DAX into SQL over the data's views.
 // =============================================================================
 
-export { createModel as connect } from '../semantic/query.js?v=a6bcd42';
+export { createModel as connect } from '../semantic/query.js?v=5ba6c38';
 
 export function createQueries(page) {
   const { UNKNOWN, ROOFTOP, shiftDate } = page;
