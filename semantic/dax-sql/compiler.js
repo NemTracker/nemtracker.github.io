@@ -15,14 +15,14 @@
 // ALL and the other modifiers, then the filters, each replacing what the context said about
 // its columns unless it is KEEPFILTERS); a measure is its expression under CALCULATE; an
 // aggregate is a scan of its table under the ctx of where it stands.
-import { parseExpression, parseQuery } from './parser.js?v=48e8ef4';
-import { DaxError, semantic, unsupported } from './errors.js?v=48e8ef4';
-import { Ctx, EMPTY_CTX, narrow } from './context.js?v=48e8ef4';
-import { isDateKey } from './model.js?v=48e8ef4';
-import * as ir from './ir.js?v=48e8ef4';
-import { dateLit, rowsTable } from './ir.js?v=48e8ef4';
-import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=48e8ef4';
-import { visualTable } from './functions/visual.js?v=48e8ef4';
+import { parseExpression, parseQuery } from './parser.js?v=943ff22';
+import { DaxError, semantic, unsupported } from './errors.js?v=943ff22';
+import { Ctx, EMPTY_CTX, narrow } from './context.js?v=943ff22';
+import { isDateKey } from './model.js?v=943ff22';
+import * as ir from './ir.js?v=943ff22';
+import { dateLit, rowsTable } from './ir.js?v=943ff22';
+import { SCALAR, TABLE, MODIFIERS } from './functions/index.js?v=943ff22';
+import { visualTable } from './functions/visual.js?v=943ff22';
 
 const lc = s => String(s).toLowerCase();
 // A column a table function named Table[Column] (ir.qualifiedName), named so.
