@@ -6,7 +6,7 @@
 //   col  [name] (v without brackets, ]] unescaped)
 //   param @name, a query parameter
 //   op   an operator or punctuation
-import { syntax } from './errors.js?v=dc6b007';
+import { syntax } from './errors.js?v=d7fe3c5';
 
 const OPS = ['==', '&&', '||', '<>', '<=', '>=', '=', '<', '>', '+', '-', '*', '/', '^', '&', '(', ')', '{', '}', ','];
 
