@@ -1,10 +1,10 @@
 // Table functions, the CALCULATE modifiers (ALL and its kind, USERELATIONSHIP, CROSSFILTER),
 // and SUMMARIZECOLUMNS.
-import * as ir from '../ir.js?v=d7fe3c5';
-import { rowsTable } from '../ir.js?v=d7fe3c5';
-import { Ctx } from '../context.js?v=d7fe3c5';
-import { semantic, unsupported } from '../errors.js?v=d7fe3c5';
-import { isDesc, filtersTable } from './aggregate.js?v=d7fe3c5';
+import * as ir from '../ir.js?v=81f2bf3';
+import { rowsTable } from '../ir.js?v=81f2bf3';
+import { Ctx } from '../context.js?v=81f2bf3';
+import { semantic, unsupported } from '../errors.js?v=81f2bf3';
+import { isDesc, filtersTable } from './aggregate.js?v=81f2bf3';
 
 const lc = s => String(s).toLowerCase();
 const isModelTableName = (c, ast, env) => ast.k === 'name' && !env.vars.has(lc(ast.name)) && !env.queryTables.has(lc(ast.name)) && c.model.hasTable(ast.name);
