@@ -750,14 +750,14 @@
   </div>
 
   <script type="module">
-    import { createDataSource } from "./storage/data.js?v=0cd6f74";
-    import { renderLogs } from "./frontend/logs.js?v=0cd6f74";
-    import { renderModel } from "./frontend/model.js?v=0cd6f74";
-    import { createQueries, connect } from "./frontend/queries.js?v=0cd6f74";
+    import { createDataSource } from "./storage/data.js?v=80cdace";
+    import { renderLogs } from "./frontend/logs.js?v=80cdace";
+    import { renderModel } from "./frontend/model.js?v=80cdace";
+    import { createQueries, connect } from "./frontend/queries.js?v=80cdace";
     import { largestBy, smallestBy, orderBy, cycle, pick, hashIndex, clampIndex, axisClip, percentiles, daysApart, dayCount,
       shiftDate, formatTime, dayAhead, playStep, playDelay, renderCost, round1, round2, kLabel, mwhAxis, fmtGwh, fmtMwh,
       fmtTonnes, fmtMwAbs, pinSide, easeTo, progress, tipPlace, legendColumns, calendarLayout, bandSeries, barPercent,
-      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=0cd6f74";
+      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=80cdace";
 
     // =========================================================================
     // 1. QUERIES: what each chart asks the model is frontend/queries.js (createQueries,
@@ -956,7 +956,7 @@
     function loadDailyAggDatabase() {
       // Not a render's: a newer render must not drop it (runQuery's `keep`).
       return _aggLoading ??= data.attachAgg().then(
-        async () => { viewsChanged(); await queries.readWholeDays(q => runQuery(q, data.query, { keep: true })); aggLoaded = true; },
+        async replaced => { if (replaced !== false) viewsChanged(); await queries.readWholeDays(q => runQuery(q, data.query, { keep: true })); aggLoaded = true; },
         e => { _aggLoading = null; throw e; });
     }
 
@@ -3109,7 +3109,6 @@
         crossFilter.hover = { region: null, fuel: null };
         crossFilter.duids = [];
         updateDuidTrigger();
-        clearQueryCache();
         clearAnalyzePreview();
 
         renderAll();
