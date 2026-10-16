@@ -11,8 +11,8 @@
 // renderModel() when it is shown; it is built once.
 // =============================================================================
 
-import { modelLayout, MODEL_CARD } from './draw.js?v=c8f09b3';
-import { ossieToTmsl } from '../semantic/formats/ossie.js?v=c8f09b3';
+import { modelLayout, MODEL_CARD } from './draw.js?v=748d3fd';
+import { ossieToTmsl } from '../semantic/formats/ossie.js?v=748d3fd';
 
 const SVG = 'http://www.w3.org/2000/svg';
 let _built = null;
@@ -26,6 +26,15 @@ const el = (tag, attrs = {}, text) => {
 };
 const lines = v => Array.isArray(v) ? v.join('\n') : v ?? '';
 
+// The model as TMSL, read once: the Model page and Explore share it.
+let _model = null;
+export function loadModel() {
+  return _model ??= (async () => {
+    const url = new URL('../semantic/ossie.json' + new URL(import.meta.url).search, import.meta.url);
+    return ossieToTmsl(await (await fetch(url)).json()).model;
+  })().catch(e => { _model = null; throw e; });
+}
+
 export function renderModel() {
   _built ??= build().catch(e => {
     _built = null;
@@ -35,8 +44,7 @@ export function renderModel() {
 }
 
 async function build() {
-  const url = new URL('../semantic/ossie.json' + new URL(import.meta.url).search, import.meta.url);
-  const { model } = ossieToTmsl(await (await fetch(url)).json());
+  const model = await loadModel();
   const rels = model.relationships;
   const keys = name => [...new Set(rels.flatMap(r => [
     ...(r.fromTable === name ? [r.fromColumn] : []), ...(r.toTable === name ? [r.toColumn] : [])]))];
