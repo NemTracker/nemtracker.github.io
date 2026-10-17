@@ -1,9 +1,9 @@
 // Functions of values: logic, math, text, dates, conversion. Each becomes an `fn` node the
 // dialect writes (dialects/base.js lists the names), or a CASE.
-import * as ir from '../ir.js?v=748d3fd';
-import { semantic, unsupported } from '../errors.js?v=748d3fd';
-import { dateLit } from '../ir.js?v=748d3fd';
-import { numberFormat, dateFormat, formatKind, isNamedDate } from '../format.js?v=748d3fd';
+import * as ir from '../ir.js?v=b52da6f';
+import { semantic, unsupported } from '../errors.js?v=b52da6f';
+import { dateLit } from '../ir.js?v=b52da6f';
+import { numberFormat, dateFormat, formatKind, isNamedDate } from '../format.js?v=b52da6f';
 
 const s = (c, a, env) => c.scalar(a, env);
 const opt = (c, a, env, dflt) => (a && a.k !== 'empty' ? c.scalar(a, env) : dflt);
