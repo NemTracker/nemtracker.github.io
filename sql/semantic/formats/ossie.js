@@ -12,7 +12,7 @@
 // ...) is kept in the object's POWER_BI custom extension, as the TMSL properties (JSON): it
 // is a deny-list, so ossieToTmsl(tmslToOssie(bim)) is the bim (an expression written as an
 // array of lines comes back as one string).
-import { tmslToModel } from './tmsl.js?v=b52da6f';
+import { tmslToModel } from './tmsl.js?v=7ec4580';
 
 const VERSION = '0.2.0.dev0';
 const VENDOR = 'POWER_BI';
