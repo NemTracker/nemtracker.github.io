@@ -1,0 +1,17 @@
+target/
+dbt_packages/
+logs/
+.user.yml
+# *.duckdb is deliberately NOT ignored: this repo serves the dashboard's .duckdb files.
+# peaceiris/actions-gh-pages stages with `git add --all`, which silently skips new files
+# matching an ignore rule -- that is how energy_data_2026_h2.duckdb never got deployed.
+*.duckdb.wal
+*.db.wal
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.vscode/
+.idea/
+.DS_Store
