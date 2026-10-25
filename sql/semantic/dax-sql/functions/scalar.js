@@ -1,0 +1,289 @@
+// Functions of values: logic, math, text, dates, conversion. Each becomes an `fn` node the
+// dialect writes (dialects/base.js lists the names), or a CASE.
+import * as ir from '../ir.js?v=34d164d';
+import { semantic, unsupported } from '../errors.js?v=34d164d';
+import { dateLit } from '../ir.js?v=34d164d';
+import { numberFormat, dateFormat, formatKind, isNamedDate } from '../format.js?v=34d164d';
+
+const s = (c, a, env) => c.scalar(a, env);
+const opt = (c, a, env, dflt) => (a && a.k !== 'empty' ? c.scalar(a, env) : dflt);
+
+// A function of its arguments' values: blank in, blank out (`strict`) unless said otherwise.
+const plain = (name, t, { arity, strict = true, nn = false } = {}) => (c, args, env) => {
+  if (arity != null && args.length < arity) throw semantic(`${name.toUpperCase()} needs ${arity} argument(s)`);
+  const a = args.map(x => s(c, x, env));
+  return ir.fn(name, a, typeof t === 'function' ? t(a) : t, { strict, nn });
+};
+const first = a => (ir.isNum(a[0].t) ? a[0].t : 'double');
+const both = a => (a.every(x => x.t === 'int') ? 'int' : 'double');
+
+// The type of a branch a condition known now leaves out (it still types IF and SWITCH, as in
+// DAX), or none when it does not compile here.
+const typeOf = (c, a, env) => {
+  if (!a || a.k === 'empty') return null;
+  try { return s(c, a, env).t; } catch { return null; }
+};
+
+// A condition that is a constant (TRUE(), 1 = 2: literals, and operators and this module's
+// functions of values on them; nothing of the model, the query or its context) is settled
+// before DAX types anything: the IF is the branch it takes, of that branch's type, and a
+// SWITCH leaves out the branches it rules out, types and all.
+function constant(a) {
+  switch (a?.k) {
+    case 'num': case 'str': case 'bool': case 'date': case 'empty': return true;
+    case 'neg': case 'not': return constant(a.e);
+    case 'bin': return constant(a.l) && constant(a.r);
+    case 'call': return Object.hasOwn(scalar, a.fn) && a.args.every(constant);
+    default: return false;
+  }
+}
+// The value of a condition that is a constant, or undefined.
+const settled = (x, ...asts) => (asts.every(constant) ? ir.valueOf(x) : undefined);
+const holds = v => v === true || (typeof v === 'number' && v !== 0);
+
+function iff(c, args, env) {
+  const cond = s(c, args[0], env);
+  const v = settled(cond, args[0]);
+  if (v !== undefined) return holds(v) ? s(c, args[1], env) : opt(c, args[2], env, ir.BLANK);
+  // A condition known now, in this context (ISFILTERED, ISINSCOPE), keeps one side; the other
+  // is compiled for its type only.
+  if (cond.k === 'lit') {
+    const yes = holds(cond.v);
+    const kept = yes ? s(c, args[1], env) : opt(c, args[2], env, ir.BLANK);
+    return ir.widen(kept, [typeOf(c, args[yes ? 2 : 1], env)]);
+  }
+  return ir.kase([[cond, s(c, args[1], env)]], opt(c, args[2], env, ir.BLANK));
+}
+
+function switchFn(c, args, env) {
+  const e = s(c, args[0], env), w = [], left = [];
+  const isTrue = e.k === 'lit' && e.v === true;
+  let i = 1, ruled = false;
+  for (; i + 1 < args.length; i += 2) {
+    const v = s(c, args[i], env);
+    const cond = isTrue ? v : ir.op('eq', e, v);
+    const known = settled(cond, args[0], args[i]);
+    if (known !== undefined) {
+      ruled = holds(known);
+      if (ruled) { w.push([ir.TRUE, s(c, args[i + 1], env)]); break; }
+      continue;   // a constant rules this branch out
+    }
+    if (cond.k === 'lit') {
+      if (cond.v === true) { w.push([ir.TRUE, s(c, args[i + 1], env)]); break; }
+      left.push(typeOf(c, args[i + 1], env));   // never this branch
+      continue;
+    }
+    w.push([cond, s(c, args[i + 1], env)]);
+  }
+  const done = w.at(-1)?.[0] === ir.TRUE;
+  if (done && !ruled) for (let j = i + 2; j < args.length; j += 2) left.push(typeOf(c, args[j + 1 < args.length ? j + 1 : j], env));
+  const els = i < args.length && !done ? s(c, args[i], env) : ir.BLANK;
+  return ir.kase(w, els, undefined, left);
+}
+
+function logical(o) {
+  return (c, args, env) => {
+    if (args.length !== 2) throw semantic(`${o.toUpperCase()} takes two arguments (use && or || for more)`);
+    return ir.op(o, s(c, args[0], env), s(c, args[1], env));
+  };
+}
+
+function coalesce(c, args, env) {
+  const a = args.map(x => s(c, x, env));
+  const k = a.findIndex(x => x.nn);
+  const used = k >= 0 ? a.slice(0, k + 1) : a;
+  if (used.length === 1) return used[0];
+  return ir.fn('coalesce', used, ir.unify(used.map(x => x.t)), { nn: k >= 0 });
+}
+
+function divide(c, args, env) {
+  const a = s(c, args[0], env), b = s(c, args[1], env), alt = opt(c, args[2], env, null);
+  // A fixed decimal divided by a number is one, as with /: by a whole number, the exact
+  // quotient rounded (cydivide).
+  const fixed = a.t === 'decimal' && (b.t === 'int' || b.t === 'double') && (!alt || ['int', 'decimal', 'blank'].includes(alt.t));
+  const q = ir.fn(fixed && b.t === 'int' ? 'cydivide' : 'divide', alt ? [a, b, alt] : [a, b], 'double');
+  return fixed ? ir.currency(q) : q;
+}
+
+function isBlank(c, args, env) { return ir.fn('isblank', [s(c, args[0], env)], 'bool', { nn: true }); }
+
+function round(name) {
+  return (c, args, env) => ir.fn(name, [s(c, args[0], env), opt(c, args[1], env, ir.lit(0))],
+    name === 'round' && !args[1] ? 'double' : 'double', { strict: true });
+}
+
+function convert(c, args, env) {
+  const x = s(c, args[0], env);
+  const to = args[1]?.k === 'name' ? args[1].name.toUpperCase() : null;
+  const map = { INTEGER: 'int', INT64: 'int', DOUBLE: 'double', DECIMAL: 'decimal', CURRENCY: 'decimal', STRING: 'string',
+    BOOLEAN: 'bool', DATETIME: 'datetime' };
+  if (!map[to]) throw semantic('CONVERT(value, INTEGER | DOUBLE | CURRENCY | STRING | BOOLEAN | DATETIME)');
+  return ir.fn('cast', [x, ir.lit(map[to], 'string')], map[to], { strict: true });
+}
+const castTo = t => (c, args, env) => ir.fn('cast', [s(c, args[0], env), ir.lit(t, 'string')], t, { strict: true });
+
+// DATE(y, m, d) and TIME(h, m, s): out-of-range parts roll over, as in DAX.
+function date(c, args, env) {
+  const a = args.map(x => s(c, x, env));
+  if (a.every(x => x.k === 'lit' && typeof x.v === 'number')) {
+    const d = new Date(Date.UTC(a[0].v, a[1].v - 1, a[2].v));
+    if (a[0].v >= 1 && a[0].v <= 9999) return dateLit(d.toISOString().slice(0, 10));
+  }
+  return ir.fn('date', a, 'datetime', { strict: true });
+}
+
+const UNITS = { DAY: 'day', MONTH: 'month', YEAR: 'year', QUARTER: 'quarter', WEEK: 'week', HOUR: 'hour', MINUTE: 'minute', SECOND: 'second' };
+export function unitArg(ast, what) {
+  const u = ast?.k === 'name' ? UNITS[ast.name.toUpperCase()] : null;
+  if (!u) throw semantic(`${what}: expected DAY, WEEK, MONTH, QUARTER, YEAR, HOUR, MINUTE or SECOND`);
+  return u;
+}
+
+function dateDiff(c, args, env) {
+  return ir.fn('datediff', [s(c, args[0], env), s(c, args[1], env), ir.lit(unitArg(args[2], 'DATEDIFF'), 'string')], 'int', { strict: true });
+}
+function eomonth(c, args, env) { return ir.fn('eomonth', [s(c, args[0], env), s(c, args[1], env)], 'datetime', { strict: true }); }
+function edate(c, args, env) { return ir.fn('add_interval', [s(c, args[0], env), s(c, args[1], env), ir.lit('month', 'string')], 'datetime', { strict: true }); }
+function weekday(c, args, env) { return ir.fn('weekday', [s(c, args[0], env), opt(c, args[1], env, ir.lit(1))], 'int', { strict: true }); }
+function weeknum(c, args, env) { return ir.fn('weeknum', [s(c, args[0], env), opt(c, args[1], env, ir.lit(1))], 'int', { strict: true }); }
+
+// FIND and SEARCH read a blank as "": nothing is found in a blank text (the NotFoundValue), and
+// a blank to find is found where the search starts.
+function search(name) {
+  return (c, args, env) => ir.fn(name, [s(c, args[0], env), s(c, args[1], env), opt(c, args[2], env, ir.lit(1)), opt(c, args[3], env, ir.BLANK)], 'int');
+}
+// Every occurrence of the old text, or only the one an instance number gives.
+function substitute(c, args, env) {
+  return ir.fn('substitute', args.slice(0, args[3] ? 4 : 3).map(x => s(c, x, env)), 'string', { strict: true });
+}
+function concatenate(c, args, env) { return ir.op('concat', s(c, args[0], env), s(c, args[1], env)); }
+function combineValues(c, args, env) { return ir.fn('combinevalues', args.map(x => s(c, x, env)), 'string', { nn: true }); }
+
+// FORMAT(value, "pattern"[, "en-US"]): the custom and named number and date patterns
+// (format.js reads them; the dialect writes them). A blank formats as "", text as itself.
+function format(c, args, env) {
+  if (args.length < 2) throw semantic('FORMAT needs a value and a format string');
+  let x = s(c, args[0], env);
+  const p = s(c, args[1], env);
+  if (p.k !== 'lit' || (p.v !== null && typeof p.v !== 'string')) throw unsupported('FORMAT with a format string that is not a constant');
+  if (args[2] && args[2].k !== 'empty') {
+    const l = s(c, args[2], env);
+    if (l.k !== 'lit' || !/^en(-us)?$/i.test(String(l.v ?? ''))) throw unsupported('FORMAT with a locale other than en-US');
+  }
+  return formatValue(x, p.v ?? '');
+}
+function formatValue(x, fmt) {
+  if (x.t === 'blank') return ir.lit('', 'string');
+  // Values of several kinds (IF(c, 1.5, "x")): each branch formatted as its kind.
+  if (x.k === 'case' && x.t === 'variant') return ir.kase(x.w.map(([c, v]) => [c, formatValue(v, fmt)]), formatValue(x.e, fmt), 'string');
+  if (x.t === 'string' || x.t === 'variant') return ir.fn('coalesce', [x, ir.lit('', 'string')], 'string', { nn: true });
+  const date = x.t === 'datetime' || x.t === 'date', kind = formatKind(fmt);
+  // A date with a number pattern is its serial number; a number with a date pattern, the date
+  // of that serial number (as Visual Basic reads them).
+  if (date && kind === 'number') x = ir.fn('date_serial', [x], 'double', { strict: true });
+  else if (!date && x.t !== 'bool' && (kind === 'date' || isNamedDate(fmt))) x = ir.fn('serial_date', [x], 'datetime', { strict: true });
+  if (x.t === 'datetime' || x.t === 'date') return ir.fn('format_date', [x, ir.lit(JSON.stringify(dateFormat(fmt)), 'string')], 'string', { nn: true });
+  return ir.fn('format_number', [x, ir.lit(JSON.stringify(numberFormat(fmt)), 'string')], 'string', { nn: true });
+}
+
+// FIXED(number[, decimals[, no_commas]]): the number rounded to that many places (2; fewer
+// than none rounds left of the point), with thousands separators unless no_commas, as text.
+// A blank is 0. The decimals and no_commas are constants here, as FORMAT's pattern is.
+function fixed(c, args, env) {
+  if (!args.length) throw semantic('FIXED needs a number');
+  let x = s(c, args[0], env);
+  const k = (a, dflt, what) => {
+    const v = opt(c, a, env, ir.lit(dflt));
+    if (v.k !== 'lit') throw unsupported(`FIXED with ${what} that is not a constant`);
+    return v.v;
+  };
+  const n = Math.trunc(Number(k(args[1], 2, 'decimals') ?? 0)), plainDigits = !!k(args[2], false, 'no_commas');
+  if (n > 22) throw unsupported('FIXED with more than 22 decimal places');
+  if (x.t === 'blank') x = ir.lit(0);
+  else if (!x.nn) x = ir.fn('coalesce', [x, ir.lit(0)], x.t, { nn: true });
+  if (n < 0) x = ir.fn('round', [x, ir.lit(n)], 'double', { strict: true });
+  const pattern = `${plainDigits ? '0' : '#,##0'}${n > 0 ? `.${'0'.repeat(n)}` : ''}`;
+  return ir.fn('format_number', [x, ir.lit(JSON.stringify(numberFormat(pattern)), 'string')], 'string', { nn: true });
+}
+
+// PATH(T[key], T[parent]): the keys from the hierarchy's root down to the row's, joined by
+// "|". It is computed as a calculated column is, over all of T's rows (no filter, no
+// security), once for the pair of columns (ir.paths), and read on the row by its key. A row
+// whose chain of parents never reaches a blank parent (an orphan, a cycle: an error in DAX)
+// has none.
+function path(c, args, env) {
+  if (args.length !== 2) throw semantic('PATH(<id column>, <parent column>)');
+  const key = c.modelColumn(args[0], env, 'PATH: a column'), parent = c.modelColumn(args[1], env, 'PATH: a column');
+  if (key.table !== parent.table) throw semantic('PATH: the id and parent columns must be of the same table');
+  const t = ir.paths(key, parent), row = ir.rowOf(t);
+  const mine = ir.filter(t, row, ir.op('eqs', ir.col(row, 0), s(c, args[0], env)));
+  return ir.agg('single', mine, row, ir.col(row, 1), 'string');
+}
+
+// PATHITEM(path, n[, TEXT | INTEGER]) and PATHITEMREVERSE: the n-th item from the left (the
+// right), blank past the path's end; as text, or as a whole number.
+function pathItem(name) {
+  return (c, args, env) => {
+    if (args.length < 2) throw semantic(`${name.toUpperCase()}(<path>, <position>[, <type>])`);
+    const x = ir.fn(name, [s(c, args[0], env), s(c, args[1], env)], 'string', { strict: true });
+    return pathType(c, args[2], env) === 'int' ? ir.fn('cast', [x, ir.lit('int', 'string')], 'int', { strict: true }) : x;
+  };
+}
+function pathType(c, a, env) {
+  if (!a || a.k === 'empty') return 'string';
+  let n = a.k === 'name' ? { TEXT: 0, INTEGER: 1 }[a.name.toUpperCase()] : undefined;
+  if (n === undefined) { const v = s(c, a, env); n = v.k === 'lit' ? v.v : null; }
+  if (n !== 0 && n !== 1) throw semantic('the type of a path item is TEXT (0) or INTEGER (1)');
+  return n === 1 ? 'int' : 'string';
+}
+
+function blankFn() { return ir.BLANK; }
+function error(c, args, env) { return ir.fn('error', [s(c, args[0], env)], 'variant'); }
+function ifError(c, args, env) { return s(c, args[0], env); }   // SQL has no error values: the value
+function isType(test) { return (c, args, env) => ir.lit(test(s(c, args[0], env).t)); }
+function user(c) {
+  const u = c.options.user;
+  if (u == null) throw unsupported('USERNAME / USERPRINCIPALNAME without options.user');
+  return ir.lit(String(u), 'string');
+}
+
+export const scalar = {
+  IF: iff, 'IF.EAGER': iff, SWITCH: switchFn, AND: logical('and'), OR: logical('or'),
+  NOT: (c, args, env) => ir.op('not', s(c, args[0], env)),
+  TRUE: () => ir.TRUE, FALSE: () => ir.FALSE, BLANK: blankFn,
+  COALESCE: coalesce, DIVIDE: divide, ISBLANK: isBlank, ERROR: error, IFERROR: ifError, ISERROR: () => ir.FALSE,
+  ISNUMBER: isType(t => ir.isNum(t)), ISTEXT: isType(t => t === 'string'), ISNONTEXT: isType(t => t !== 'string'),
+  ISLOGICAL: isType(t => t === 'bool'), ISEVEN: plain('iseven', 'bool'), ISODD: plain('isodd', 'bool'),
+  USERNAME: user, USERPRINCIPALNAME: user,
+  // math
+  ABS: plain('abs', first), SIGN: plain('sign', 'int'), SQRT: plain('sqrt', 'double'), EXP: plain('exp', 'double'),
+  LN: plain('ln', 'double'), LOG: (c, args, env) => ir.fn('log', [s(c, args[0], env), opt(c, args[1], env, ir.lit(10))], 'double', { strict: true }),
+  LOG10: plain('log10', 'double'), POWER: plain('power', 'double', { arity: 2 }), MOD: plain('mod', both, { arity: 2 }),
+  QUOTIENT: plain('quotient', 'int', { arity: 2 }), ROUND: round('round'), ROUNDUP: round('roundup'), ROUNDDOWN: round('rounddown'),
+  INT: plain('int', 'int'), TRUNC: round('trunc'), CEILING: plain('ceiling', 'double'), FLOOR: plain('floor', 'double'),
+  'ISO.CEILING': plain('ceiling', 'double'), MROUND: plain('mround', 'double'), PI: () => ir.lit(Math.PI, 'double'),
+  RAND: () => ir.fn('rand', [], 'double', { nn: true }), RANDBETWEEN: plain('randbetween', 'int'),
+  GCD: plain('gcd', 'int'), LCM: plain('lcm', 'int'), FACT: plain('fact', 'int'), EVEN: plain('even', 'int'), ODD: plain('odd', 'int'),
+  CONVERT: convert, CURRENCY: castTo('decimal'), VALUE: plain('value', 'double'), FIXED: fixed,
+  // text
+  CONCATENATE: concatenate, COMBINEVALUES: combineValues, LEFT: plain('left', 'string'), RIGHT: plain('right', 'string'),
+  MID: plain('mid', 'string', { arity: 3 }), LEN: plain('len', 'int'), UPPER: plain('upper', 'string'), LOWER: plain('lower', 'string'),
+  TRIM: plain('trim', 'string'), SUBSTITUTE: substitute, REPLACE: plain('replace', 'string', { arity: 4 }),
+  SEARCH: search('search'), FIND: search('find'), REPT: plain('rept', 'string'),
+  EXACT: plain('exact', 'bool', { strict: false, nn: true }), UNICHAR: plain('unichar', 'string'), UNICODE: plain('unicode', 'int'),
+  CONTAINSSTRING: plain('containsstring', 'bool', { strict: false, nn: true }),
+  CONTAINSSTRINGEXACT: plain('containsstringexact', 'bool', { strict: false, nn: true }), FORMAT: format,
+  // parent-child hierarchies
+  PATH: path, PATHITEM: pathItem('pathitem'), PATHITEMREVERSE: pathItem('pathitemreverse'),
+  PATHLENGTH: plain('pathlength', 'int', { arity: 1 }),
+  PATHCONTAINS: plain('pathcontains', 'bool', { arity: 2, strict: false, nn: true }),
+  // dates
+  DATE: date, TIME: plain('time', 'datetime'), YEAR: plain('year', 'int'), MONTH: plain('month', 'int'), DAY: plain('day', 'int'),
+  HOUR: plain('hour', 'int'), MINUTE: plain('minute', 'int'), SECOND: plain('second', 'int'), QUARTER: plain('quarter', 'int'),
+  WEEKDAY: weekday, WEEKNUM: weeknum, EOMONTH: eomonth, EDATE: edate, DATEDIFF: dateDiff,
+  TODAY: () => ir.fn('today', [], 'datetime', { nn: true }), NOW: () => ir.fn('now', [], 'datetime', { nn: true }),
+  UTCTODAY: () => ir.fn('utctoday', [], 'datetime', { nn: true }), UTCNOW: () => ir.fn('utcnow', [], 'datetime', { nn: true }),
+  DATEVALUE: castTo('datetime'), TIMEVALUE: unsupportedFn('TIMEVALUE'),
+};
+
+function unsupportedFn(name) { return () => { throw unsupported(name); }; }
