@@ -14,8 +14,8 @@
 //     over those rows;
 //   - COLLAPSE is the value at the parent row (a total of the row's lowest group), COLLAPSEALL
 //     at the axis's grand total; ISATLEVEL, whether the row is not a total of a column's group.
-import * as ir from '../ir.js?v=3f6449d';
-import { semantic, unsupported } from '../errors.js?v=3f6449d';
+import * as ir from '../ir.js?v=fa0198b';
+import { semantic, unsupported } from '../errors.js?v=fa0198b';
 
 const lc = s => String(s).toLowerCase();
 const word = (a, set) => a?.k === 'name' && set.includes(a.name.toUpperCase());
