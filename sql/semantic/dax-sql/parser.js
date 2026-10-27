@@ -16,8 +16,8 @@
 //   { kind:'measure'|'column', table, name, e } | { kind:'var'|'table', name, e }
 // and a table WITH VISUAL SHAPE (a visual calculation's) also has
 //   shape: { axes: [{ name, groups: [{ cols, total }], order: [{ col, desc }] }], densify }
-import { lex } from './lexer.js?v=fd28a5e';
-import { syntax } from './errors.js?v=fd28a5e';
+import { lex } from './lexer.js?v=964a081';
+import { syntax } from './errors.js?v=964a081';
 
 // Words that cannot be a bare name. (ASC and DESC can: they are arguments of TOPN, RANKX.)
 const KEYWORDS = new Set(['VAR', 'RETURN', 'EVALUATE', 'DEFINE', 'MEASURE', 'ORDER', 'BY', 'IN', 'NOT', 'START']);
