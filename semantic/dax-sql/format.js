@@ -12,7 +12,7 @@
 // yyyy h hh n nn s ss ttttt AM/PM am/pm A/P a/p AMPM c / :, m and mm being minutes right
 // after h or hh; and General Date, Long Date, Medium Date, Short Date, Long Time, Medium Time,
 // Short Time.
-import { unsupported } from './errors.js?v=0f84fd6';
+import { unsupported } from './errors.js?v=2d1eb02';
 
 const NUMBER_NAMES = {
   'general number': { general: true },
