@@ -12,9 +12,9 @@
 // its expanded table (joined from the scan's table through the relationships, or read off
 // the foreign key when the relationship relies on referential integrity), and the filters
 // that reach it over bidirectional or many-to-many relationships, as semi-joins.
-import * as ir from './ir.js?v=4ac2067';
-import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=4ac2067';
-import { semantic } from './errors.js?v=4ac2067';
+import * as ir from './ir.js?v=a6c3d54';
+import { Ctx, narrow, EMPTY_CTX as EMPTY } from './context.js?v=a6c3d54';
+import { semantic } from './errors.js?v=a6c3d54';
 
 const lc = s => String(s).toLowerCase();
 
