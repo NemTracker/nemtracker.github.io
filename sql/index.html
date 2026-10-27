@@ -840,15 +840,15 @@
   </div>
 
   <script type="module">
-    import { createDataSource } from "./storage/data.js?v=c679d9c";
-    import { renderLogs } from "./frontend/logs.js?v=c679d9c";
-    import { renderModel, loadModel } from "./frontend/model.js?v=c679d9c";
-    import { createExplorer } from "./frontend/explore.js?v=c679d9c";
-    import { createQueries, connect } from "./frontend/queries.js?v=c679d9c";
+    import { createDataSource } from "./storage/data.js?v=52cdc75";
+    import { renderLogs } from "./frontend/logs.js?v=52cdc75";
+    import { renderModel, loadModel } from "./frontend/model.js?v=52cdc75";
+    import { createExplorer } from "./frontend/explore.js?v=52cdc75";
+    import { createQueries, connect } from "./frontend/queries.js?v=52cdc75";
     import { largestBy, smallestBy, orderBy, cycle, pick, hashIndex, clampIndex, axisClip, percentiles, daysApart, dayCount,
       shiftDate, formatTime, dayAhead, playStep, playDelay, renderCost, round1, round2, kLabel, mwhAxis, fmtGwh, fmtMwh,
       fmtTonnes, fmtMwAbs, pinSide, easeTo, progress, tipPlace, legendColumns, calendarLayout, bandSeries, barPercent,
-      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=c679d9c";
+      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=52cdc75";
 
     // =========================================================================
     // 1. QUERIES: what each chart asks the model is frontend/queries.js (createQueries,
@@ -1034,7 +1034,8 @@
     // (a host that stores the files differently ships its own): it has a view per table. How
     // the page asks is frontend/queries.js's: the queries, and `connect`, what runs them over
     // the data. The Analyze tab is SQL: over the semantic model, or over the same views.
-    const data = connect(createDataSource({ onStatus: setStatus, onProgress: setProgress }));
+    // Brisbane time, for CURRENT_DATE alone (the NEM's day): the tables carry date and time.
+    const data = connect(createDataSource({ onStatus: setStatus, onProgress: setProgress, timeZone: 'Australia/Brisbane' }));
     // A host whose engine is the model itself (VertiPaq, in the Fabric app of that name) runs
     // no SQL: its data source has no `needs`, and the tab is left out.
     if (!data.needs) document.getElementById('tab-analyze').remove();
