@@ -14,7 +14,7 @@
 // ALLSELECTED removes when it puts back the shadow of that iteration.
 // Removing columns from a filter (ALL, or a new filter on the same column) drops what it says
 // about them and keeps what it says about the others.
-import { distinct, project, filter as filterRows, scan, itemOf, rowOf, newRow } from './ir.js?v=af083d5';
+import { distinct, project, filter as filterRows, scan, itemOf, rowOf, newRow } from './ir.js?v=c1144aa';
 
 export class Ctx {
   constructor(filters = [], mods = null) {
