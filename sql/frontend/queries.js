@@ -24,7 +24,7 @@
 // folder of the site, sql/, and reads the site's files, one folder up.
 // =============================================================================
 
-import { createModel } from '../semantic/query.js?v=98ff2a7';
+import { createModel } from '../semantic/query.js?v=0f84fd6';
 
 export const connect = data => createModel({ ...data, init: () => data.init({ base: '../' }) });
 
