@@ -367,10 +367,10 @@
   </dialog>
 
 <script type="module">
-import { createDataSource } from '../storage/data.js?v=04f93fd';
-import { connect, createQueries } from '../frontend/queries.js?v=04f93fd';
-import { perf } from '../frontend/perflog.js?v=04f93fd';
-import { renderModel } from '../frontend/model.js?v=04f93fd';
+import { createDataSource } from '../storage/data.js?v=22a0613';
+import { connect, createQueries } from '../frontend/queries.js?v=22a0613';
+import { perf } from '../frontend/perflog.js?v=22a0613';
+import { renderModel } from '../frontend/model.js?v=22a0613';
 
 const $ = id => document.getElementById(id);
 const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
