@@ -577,6 +577,43 @@
       .mix-seg, .region-tile, .record-card { transition: none; }
     }
   </style>
+<link rel="preload" href="semantic/ossie.json?v=3a991cd" as="fetch" crossorigin>
+<link rel="modulepreload" href="storage/data.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/logs.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/model.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/explore.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/profile.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/queries.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/draw.js?v=3a991cd">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev65.0/+esm" crossorigin>
+<link rel="modulepreload" href="storage/history.js?v=3a991cd">
+<link rel="modulepreload" href="storage/views.js?v=3a991cd">
+<link rel="modulepreload" href="storage/queue.js?v=3a991cd">
+<link rel="modulepreload" href="frontend/perflog.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/formats/ossie.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/query.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/formats/tmsl.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/index.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/model.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/compiler.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/emit.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/parser.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/dialects/duckdb.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/dialects/base.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/ir.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/errors.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/context.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/sql.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/index.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/visual.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/lexer.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/dialects/duckdb-format.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/scalar.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/aggregate.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/table.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/time.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/functions/window.js?v=3a991cd">
+<link rel="modulepreload" href="semantic/dax-sql/format.js?v=3a991cd">
 </head>
 <body>
   <div class="chrome">
@@ -899,16 +936,16 @@
   </div>
 
   <script type="module">
-    import { createDataSource } from "./storage/data.js?v=b59c644";
-    import { renderLogs } from "./frontend/logs.js?v=b59c644";
-    import { renderModel, loadModel } from "./frontend/model.js?v=b59c644";
-    import { createExplorer } from "./frontend/explore.js?v=b59c644";
-    import { createPlanView, profileSql } from "./frontend/profile.js?v=b59c644";
-    import { createQueries, connect } from "./frontend/queries.js?v=b59c644";
+    import { createDataSource } from "./storage/data.js?v=3a991cd";
+    import { renderLogs } from "./frontend/logs.js?v=3a991cd";
+    import { renderModel, loadModel } from "./frontend/model.js?v=3a991cd";
+    import { createExplorer } from "./frontend/explore.js?v=3a991cd";
+    import { createPlanView, profileSql } from "./frontend/profile.js?v=3a991cd";
+    import { createQueries, connect } from "./frontend/queries.js?v=3a991cd";
     import { largestBy, smallestBy, orderBy, cycle, pick, hashIndex, clampIndex, axisClip, percentiles, daysApart, dayCount,
       shiftDate, formatTime, dayAhead, playStep, playDelay, renderCost, round1, round2, kLabel, mwhAxis, fmtGwh, fmtMwh,
       fmtTonnes, fmtMwAbs, pinSide, easeTo, progress, tipPlace, legendColumns, calendarLayout, bandSeries, barPercent,
-      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip, elapsed, cellText } from "./frontend/draw.js?v=b59c644";
+      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip, elapsed, cellText } from "./frontend/draw.js?v=3a991cd";
 
     // =========================================================================
     // 1. QUERIES: what each chart asks the model is frontend/queries.js (createQueries,
@@ -3464,7 +3501,7 @@
         // Curtailment reads agg whatever the range.
         if (document.getElementById('view-insights').style.display !== 'none' && insightsPage() === 'renewables') guarded(renderCurtailment(_renderSeq));
       })
-        .catch(e => console.warn('[OPFS] Agg load failed:', e));
+        .catch(e => console.warn('[agg] load failed:', e));
     } catch (e) {
       setStatus("Error: " + e.message, "error");
       console.error(e);

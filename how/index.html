@@ -367,10 +367,10 @@
   </dialog>
 
 <script type="module">
-import { createDataSource } from '../storage/data.js?v=b59c644';
-import { connect, createQueries } from '../frontend/queries.js?v=b59c644';
-import { perf } from '../frontend/perflog.js?v=b59c644';
-import { renderModel } from '../frontend/model.js?v=b59c644';
+import { createDataSource } from '../storage/data.js?v=3a991cd';
+import { connect, createQueries } from '../frontend/queries.js?v=3a991cd';
+import { perf } from '../frontend/perflog.js?v=3a991cd';
+import { renderModel } from '../frontend/model.js?v=3a991cd';
 
 const $ = id => document.getElementById(id);
 const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
@@ -394,7 +394,8 @@ const page = {
   region: () => null, fuel: () => null, picked: () => [], newestDate: () => newest,
 };
 const queries = createQueries(page);
-const source = createDataSource({ onStatus: status });
+// Brisbane time, as the dashboard's session: the NEM's day.
+const source = createDataSource({ onStatus: status, timeZone: 'Australia/Brisbane' });
 const data = connect(source);
 const OSSIE = await (await fetch(new URL('../semantic/ossie.json' + new URL(import.meta.url).search, import.meta.url))).json();
 
