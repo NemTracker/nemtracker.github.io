@@ -3,14 +3,14 @@
 // header sorts by it (numbers largest first, text A-Z), a second click reverses
 // =============================================================================
 // A query the page wrote in DAX is shown as written, with the SQL it became under it; one
-// written in SQL (the Analyze tab, the compiler's own) is the SQL alone.
+// written in SQL (the Explore tab's SQL box, the compiler's own) is the SQL alone.
 // The same file on every host. This session only (perflog.js); the one way out is the Copy
 // button. index.html has the tab and its panel and calls renderLogs() when the tab is opened;
 // after that it is re-rendered on new events while the tab is visible (throttled to one
 // render per animation frame).
 // =============================================================================
 
-import { perf, BUILD } from './perflog.js?v=720efb2';
+import { perf, BUILD } from './perflog.js?v=b59c644';
 
 const _pageStart = performance.timeOrigin;
 let _logsFrame = 0;

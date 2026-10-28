@@ -12,19 +12,19 @@
 //                                                the half-years a 5-minute range needs
 // The page knows none of this: it reads a view per table, v_<table>, which views.js builds
 // over the attached databases after every attach (they are found in the engine's catalog).
-// This file, history.js and views.js are GitHub Pages' alone (dashboard/github/, staged
-// into the page's storage/, dashboard/page/). Every other host has its own data.js with the same members
-// (dashboard/fabric_app/<engine>/site/storage/).
+// This file, history.js and views.js are GitHub Pages' alone (front_end/github/, staged
+// into the page's storage/, front_end/page/). Every other host has its own data.js with the same members
+// (front_end/fabric_app/<engine>/site/storage/).
 //
 // DOM-free: progress is reported through the injected `onStatus` callback, and what is
 // fetched, attached and run is timed in perflog.js, for the Logs tab.
 // =============================================================================
 
 import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev65.0/+esm";
-import { periodsForRange, attachCached } from "./history.js?v=720efb2";
-import { withViews } from "./views.js?v=720efb2";
-import { serialQueue } from "./queue.js?v=720efb2";
-import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=720efb2";
+import { periodsForRange, attachCached } from "./history.js?v=b59c644";
+import { withViews } from "./views.js?v=b59c644";
+import { serialQueue } from "./queue.js?v=b59c644";
+import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=b59c644";
 
 export function createDataSource({ onStatus = () => {} } = {}) {
   let conn;
@@ -136,6 +136,10 @@ export function createDataSource({ onStatus = () => {} } = {}) {
     _db = new duckdb.AsyncDuckDB(logger, worker);
     await _db.instantiate(bundle.mainModule, bundle.pthreadWorker);
     URL.revokeObjectURL(workerUrl);
+    // A number reaches JavaScript as a number: a BIGINT, HUGEINT or DECIMAL comes out of the
+    // engine as a DOUBLE (duckdb-wasm's own casts, on every result), not as a BigInt or an
+    // unscaled integer. The compiler leaves the engine's types alone (semantic/query.js).
+    await _db.open({ query: { castBigIntToDouble: true, castDecimalToDouble: true } });
 
     conn = await _db.connect();
     const baseUrl = new URL(base || '.', window.location.href).href.replace(/\/$/, "");

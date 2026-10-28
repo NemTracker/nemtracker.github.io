@@ -51,6 +51,11 @@ export function percentiles(values, lo, hi) {
 // 4 days long), `dayCount` both counted, how a range is named ("previous 4 days").
 export const daysApart = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 export const dayCount = (from, to) => daysApart(from, to) + 1;
+// A value of a result as a cell's text: a number as JavaScript writes it, a list or a struct
+// as JSON, a blank as nothing.
+export const cellText = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v.toJSON?.() ?? v) : String(v);
+// The seconds since t0 (a performance.now()), written as "3.2 s": a running query's timer.
+export const elapsed = t0 => `${((performance.now() - t0) / 1000).toFixed(1)} s`;
 // A date string moved by n days.
 export function shiftDate(date, n) {
   const d = new Date(`${date}T00:00:00Z`);
@@ -109,7 +114,7 @@ export const stackedGrids = (n, top = 0) => Array.from({ length: n }, (_, i) => 
   return { title: `${at + 0.5}%`, grid: { left: 4, right: 16, containLabel: true, top: `${at + 5}%`, height: `${(100 - top) / n - 11}%` } };
 });
 
-// --- The CSV of Analyze ---
+// --- The CSV of Explore ---
 // The rows of a SQL query written out as a CSV file, batch by batch as the engine sends them,
 // every value as it is stored (a date as a date, a timestamp without its zone). Returns the
 // number of rows written.
@@ -260,7 +265,7 @@ export function nightBands(date, hhmm) {
   }).filter(Boolean);
 }
 
-// The semantic model as a star (Analyze, Model): the tables a relationship points to (the
+// The semantic model as a star (Explore, Model): the tables a relationship points to (the
 // dimensions) in a centre column, in the model's order, and the facts on either side of it,
 // each as near as it can be to the height of the dimensions it reaches, so that few lines
 // cross. `tables` is [{ name, lines }] (a card's text lines under its name), `rels` the

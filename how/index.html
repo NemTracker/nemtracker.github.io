@@ -13,7 +13,7 @@
     DAX (toDax), the plan (dax-sql's SQL), the run on DuckDB-WASM, the catalog and the files.
     The report on the left, the cards in two rows: one screen, no scrolling. Documentation,
     not the dashboard: it reads the same modules and files and changes nothing of them. Only
-    the DAX page has it (dashboard/page/dax/), at the site's how/.
+    the DAX page has it (front_end/page/dax/), at the site's how/.
   -->
   <script>
     try {
@@ -351,7 +351,7 @@
             <li>With AI in the loop it gets worse: an agent fixes a wrong number where it sees it, in the query, so the rule is copied once more, a little differently each time.</li>
             <li>A small surface means fewer errors. A visual here can only name fields and filters; a lint refuses arithmetic in the page.</li>
             <li>The cost: a new figure is a new measure in the model, not a quick line of SQL in the chart.</li>
-            <li>SQL in the front end still has its place for exploration: the dashboard's Analyze tab takes any SQL.</li></ul></section>
+            <li>SQL in the front end still has its place for exploration: the dashboard's Explore tab takes any SQL.</li></ul></section>
         </div>
       </div>
       <div class="dlg-ai" id="dlgAi" hidden>
@@ -367,10 +367,10 @@
   </dialog>
 
 <script type="module">
-import { createDataSource } from '../storage/data.js?v=720efb2';
-import { connect, createQueries } from '../frontend/queries.js?v=720efb2';
-import { perf } from '../frontend/perflog.js?v=720efb2';
-import { renderModel } from '../frontend/model.js?v=720efb2';
+import { createDataSource } from '../storage/data.js?v=b59c644';
+import { connect, createQueries } from '../frontend/queries.js?v=b59c644';
+import { perf } from '../frontend/perflog.js?v=b59c644';
+import { renderModel } from '../frontend/model.js?v=b59c644';
 
 const $ = id => document.getElementById(id);
 const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
