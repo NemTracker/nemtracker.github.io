@@ -23,23 +23,23 @@
 //   roles          the names of the model's roles to query as (row-level security): every
 //                  table's rows are those some role keeps
 //   params         the values of query parameters (@name), by name
-import { Model } from './model.js?v=fbe588e';
-import { Compiler } from './compiler.js?v=fbe588e';
-import { Emitter } from './emit.js?v=fbe588e';
-import { parseExpression } from './parser.js?v=fbe588e';
-import { DuckDBDialect } from './dialects/duckdb.js?v=fbe588e';
-import { Dialect } from './dialects/base.js?v=fbe588e';
-import { newRow } from './ir.js?v=fbe588e';
-import { DaxError, semantic } from './errors.js?v=fbe588e';
-import { Ctx } from './context.js?v=fbe588e';
-import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=fbe588e';
+import { Model } from './model.js?v=0b6ce17';
+import { Compiler } from './compiler.js?v=0b6ce17';
+import { Emitter } from './emit.js?v=0b6ce17';
+import { parseExpression } from './parser.js?v=0b6ce17';
+import { DuckDBDialect } from './dialects/duckdb.js?v=0b6ce17';
+import { Dialect } from './dialects/base.js?v=0b6ce17';
+import { newRow } from './ir.js?v=0b6ce17';
+import { DaxError, semantic } from './errors.js?v=0b6ce17';
+import { Ctx } from './context.js?v=0b6ce17';
+import { SqlTranslator, isSql, printDaxQuery, modelRelations } from './sql.js?v=0b6ce17';
 
-export { DaxError } from './errors.js?v=fbe588e';
-export { Dialect } from './dialects/base.js?v=fbe588e';
-export { DuckDBDialect } from './dialects/duckdb.js?v=fbe588e';
-export { parseQuery, parseExpression } from './parser.js?v=fbe588e';
-export { parseSql, modelRelations } from './sql.js?v=fbe588e';
-export { Model } from './model.js?v=fbe588e';
+export { DaxError } from './errors.js?v=0b6ce17';
+export { Dialect } from './dialects/base.js?v=0b6ce17';
+export { DuckDBDialect } from './dialects/duckdb.js?v=0b6ce17';
+export { parseQuery, parseExpression } from './parser.js?v=0b6ce17';
+export { parseSql, modelRelations } from './sql.js?v=0b6ce17';
+export { Model } from './model.js?v=0b6ce17';
 
 const DIALECTS = { duckdb: () => new DuckDBDialect() };
 
