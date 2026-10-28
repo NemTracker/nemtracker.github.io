@@ -7,10 +7,10 @@
 // the column to (a group key, a context transition). A column with no outer value takes each
 // of its values in the filter context, and the result is the union over them. With no
 // relation, it is ALLSELECTED of the ORDERBY and PARTITIONBY columns.
-import * as ir from '../ir.js?v=6e2ab18';
-import { semantic, unsupported } from '../errors.js?v=6e2ab18';
-import { isDesc } from './aggregate.js?v=6e2ab18';
-import { visualWindow, isReset } from './visual.js?v=6e2ab18';
+import * as ir from '../ir.js?v=e98fbc9';
+import { semantic, unsupported } from '../errors.js?v=e98fbc9';
+import { isDesc } from './aggregate.js?v=e98fbc9';
+import { visualWindow, isReset } from './visual.js?v=e98fbc9';
 
 const lc = s => String(s).toLowerCase();
 const word = (a, set) => a?.k === 'name' && set.includes(a.name.toUpperCase());

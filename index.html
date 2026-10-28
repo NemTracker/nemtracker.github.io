@@ -846,15 +846,15 @@
   </div>
 
   <script type="module">
-    import { createDataSource } from "./storage/data.js?v=6e2ab18";
-    import { renderLogs } from "./frontend/logs.js?v=6e2ab18";
-    import { renderModel, loadModel } from "./frontend/model.js?v=6e2ab18";
-    import { createExplorer } from "./frontend/explore.js?v=6e2ab18";
-    import { createQueries, connect } from "./frontend/queries.js?v=6e2ab18";
+    import { createDataSource } from "./storage/data.js?v=e98fbc9";
+    import { renderLogs } from "./frontend/logs.js?v=e98fbc9";
+    import { renderModel, loadModel } from "./frontend/model.js?v=e98fbc9";
+    import { createExplorer } from "./frontend/explore.js?v=e98fbc9";
+    import { createQueries, connect } from "./frontend/queries.js?v=e98fbc9";
     import { largestBy, smallestBy, orderBy, cycle, pick, hashIndex, clampIndex, axisClip, percentiles, daysApart, dayCount,
       shiftDate, formatTime, dayAhead, playStep, playDelay, renderCost, round1, round2, kLabel, mwhAxis, fmtGwh, fmtMwh,
       fmtTonnes, fmtMwAbs, pinSide, easeTo, progress, tipPlace, legendColumns, calendarLayout, bandSeries, barPercent,
-      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=6e2ab18";
+      bubbleSize, arrowWidth, arrowLabelled, dotSize, unitSize, sparkline, nightBands, moreOf, writeCsv, stackValue, axisAt, axisTooltip } from "./frontend/draw.js?v=e98fbc9";
 
     // =========================================================================
     // 1. QUERIES: what each chart asks the model is frontend/queries.js (createQueries,
@@ -3038,7 +3038,6 @@
     function openExplorer() {
       explorer ??= createExplorer(document.getElementById('analyze-explore'), {
         model: loadModel,
-        toSQL: q => data.toSQL(data.toDax(q)),
         run: async q => {
           await ensureExploreData(data.toSQL(data.toDax(q)), q.where);
           const rows = await runQuery(q, data.query, { keep: true });
@@ -3159,7 +3158,8 @@
         // SQL over the views runs through analyze(), as the SQL page's plan does: query()
         // takes the page's queries only (objects, or SELECTs over the model).
         const rows = await runQuery(`EXPLAIN ${sql}`, data.analyze(sql).query, { keep: true });
-        explorer.showPlan(rows.map(r => r.explain_value ?? Object.values(r).join('  ')).join('\n'));
+        // The SQL first, then its plan.
+        explorer.showPlan(`-- SQL\n${sql}\n\n-- Plan (EXPLAIN)\n${rows.map(r => r.explain_value ?? Object.values(r).join('  ')).join('\n')}`);
         setConnected();
       } catch (e) {
         setStatus("Query error: " + e.message, "error");
