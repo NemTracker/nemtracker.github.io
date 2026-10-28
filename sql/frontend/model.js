@@ -11,8 +11,8 @@
 // renderModel() when it is shown; it is built once.
 // =============================================================================
 
-import { modelLayout, MODEL_CARD } from './draw.js?v=00ea6c2';
-import { ossieToTmsl } from '../semantic/formats/ossie.js?v=00ea6c2';
+import { modelLayout, MODEL_CARD } from './draw.js?v=3000fdb';
+import { ossieToTmsl } from '../semantic/formats/ossie.js?v=3000fdb';
 
 const SVG = 'http://www.w3.org/2000/svg';
 let _built = null;
