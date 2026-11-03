@@ -21,10 +21,10 @@
 // =============================================================================
 
 import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev65.0/+esm";
-import { periodsForRange, attachCached } from "./history.js?v=3a991cd";
-import { withViews } from "./views.js?v=3a991cd";
-import { serialQueue } from "./queue.js?v=3a991cd";
-import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=3a991cd";
+import { periodsForRange, attachCached } from "./history.js?v=0fae569";
+import { withViews } from "./views.js?v=0fae569";
+import { serialQueue } from "./queue.js?v=0fae569";
+import { perf, HTTP_TRACE_SHIM } from "../frontend/perflog.js?v=0fae569";
 
 // timeZone: the session's, which CURRENT_DATE follows; the page's to say (none: DuckDB's own).
 export function createDataSource({ onStatus = () => {}, timeZone = null } = {}) {
