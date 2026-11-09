@@ -13,7 +13,7 @@
 // =============================================================================
 
 import { tableToIPC, tableFromIPC } from "https://cdn.jsdelivr.net/npm/apache-arrow@17.0.0/+esm";
-import { perf } from "../frontend/perflog.js?v=0fae569";
+import { perf } from "../frontend/perflog.js?v=ddc8d4f";
 
 const RESULT_MAX = 8 * 1024 * 1024, RESULTS_MAX = 256 * 1024 * 1024;
 const VOLATILE = /\bcurrent_(date|time|timestamp)\b|\b(now|today|random|uuid|gen_random_uuid|setseed|nextval|get_current_time|timezone)\s*\(/i;
