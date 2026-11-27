@@ -11,7 +11,7 @@
 // a chart. The host passes in how to run a query and how to draw (createExplorer's `ctx`).
 // =============================================================================
 
-import { formatValue, shade, extent, stackedGrids, shiftDate, elapsed } from './draw.js?v=861817b';
+import { formatValue, shade, extent, stackedGrids, shiftDate, elapsed } from './draw.js?v=d517372';
 
 const CAP = 5000;             // rows asked for at most
 const SERIES_CAP = 24;        // series a chart draws at most
