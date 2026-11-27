@@ -48,8 +48,8 @@
 // front_end/fabric_app/vertipaq) gets the query's DAX as it is: no views, no SQL.
 // =============================================================================
 
-import { createCompiler } from './dax-sql/index.js?v=d5ae5c5';
-import { ossieToTmsl, ossieToModel } from './formats/ossie.js?v=d5ae5c5';
+import { createCompiler } from './dax-sql/index.js?v=7bf9558';
+import { ossieToTmsl, ossieToModel } from './formats/ossie.js?v=7bf9558';
 
 // The model, fetched next to this file, with this file's ?v= (the Fabric build's cache-buster).
 const OSSIE = await (await fetch(new URL('./ossie.json' + new URL(import.meta.url).search, import.meta.url))).json();
